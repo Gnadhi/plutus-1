@@ -65,6 +65,7 @@ import PlutusCore.Pretty
 
 import UntypedPlutusCore.Evaluation.Machine.Cek.CekMachineCosts (CekMachineCosts (..))
 
+import Control.Lens (ix, (^?))
 import Control.Lens.Review
 import Control.Monad.Catch
 import Control.Monad.Except
@@ -76,7 +77,7 @@ import Data.Kind qualified as GHC
 import Data.Proxy
 import Data.Semigroup (stimes)
 import Data.Text (Text)
-import Data.Word64Array.Word8
+import Data.Word64Array.Word8 hiding (toList)
 import Prettyprinter
 import Universe
 
@@ -202,6 +203,7 @@ data CekValue uni fun =
       (CekValEnv uni fun)    -- For discharging.
       !(BuiltinRuntime (CekValue uni fun))  -- The partial application and its costing function.
                                             -- Check the docs of 'BuiltinRuntime' for details.
+  | VProd !(Array Int (CekValue uni fun))
     deriving (Show)
 
 type CekValEnv uni fun = UniqueMap TermUnique (CekValue uni fun)
@@ -454,6 +456,7 @@ dischargeCekValue = \case
     -- We only discharge a value when (a) it's being returned by the machine,
     -- or (b) it's needed for an error message.
     VBuiltin _ term env _  -> dischargeCekValEnv env term
+    VProd es               -> Prod () (toList $ fmap dischargeCekValue es)
 
 instance (Closed uni, GShow uni, uni `Everywhere` PrettyConst, Pretty fun) =>
             PrettyBy PrettyConfigPlc (CekValue uni fun) where
@@ -478,6 +481,8 @@ data Context uni fun
     = FrameApplyFun !(CekValue uni fun) !(Context uni fun)                         -- ^ @[V _]@
     | FrameApplyArg !(CekValEnv uni fun) (Term Name uni fun ()) !(Context uni fun) -- ^ @[_ N]@
     | FrameForce !(Context uni fun)                                               -- ^ @(force _)@
+    | FrameProd !(CekValEnv uni fun) ![Term Name uni fun ()] ![CekValue uni fun]! (Context uni fun)
+    | FrameProj Int !(Context uni fun)
     | NoFrame
     deriving (Show)
 
@@ -487,6 +492,7 @@ toExMemory = \case
     VDelay {}   -> 1
     VLamAbs {}  -> 1
     VBuiltin {} -> 1
+    VProd {}    -> 1
 {-# INLINE toExMemory #-}  -- It probably gets inlined anyway, but an explicit pragma
                            -- shouldn't hurt.
 
@@ -600,6 +606,11 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- s ; ρ ▻ error A  ↦  <> A
     computeCek !_ !_ !_ (Error _) =
         throwing_ _EvaluationFailure
+    computeCek !unbudgetedSteps !ctx !env (Prod _ es) = case es of
+        []     -> returnCek unbudgetedSteps ctx $ VProd $ array (0,0) []
+        t : ts -> computeCek unbudgetedSteps (FrameProd env ts [] ctx) env t
+    computeCek !unbudgetedSteps !ctx !env (Proj _ i t) =
+        computeCek unbudgetedSteps (FrameProj i ctx) env t
 
     {- | The returning phase of the CEK machine.
     Returns 'EvaluationSuccess' in case the context is empty, otherwise pops up one frame
@@ -629,6 +640,18 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- FIXME: add rule for VBuiltin once it's in the specification.
     returnCek !unbudgetedSteps (FrameApplyFun fun ctx) arg =
         applyEvaluate unbudgetedSteps ctx fun arg
+    returnCek !unbudgetedSteps (FrameProd env todo done ctx) e =
+        let done' = e:done
+        in case todo of
+            -- TODO: more efficient
+            []     -> returnCek unbudgetedSteps ctx $ VProd $ listArray (0, length done' - 1) (reverse done')
+            t : ts -> computeCek unbudgetedSteps (FrameProd env ts done' ctx) env t
+    returnCek !unbudgetedSteps (FrameProj i ctx) p = case p of
+        -- TODO: causes
+        VProd es -> case es ^? ix i of
+            Just e  -> returnCek unbudgetedSteps ctx e
+            Nothing -> throwingWithCause _MachineError (ProductIndexOutOfBoundsMachineError i) Nothing
+        _ -> throwingWithCause _MachineError NonProductIndexedMachineError Nothing
 
     -- | @force@ a term and proceed.
     -- If v is a delay then compute the body of v;
@@ -710,8 +733,8 @@ enterComputeCek = computeCek (toWordArray 0) where
     stepAndMaybeSpend :: StepKind -> WordArray -> CekM uni fun s WordArray
     stepAndMaybeSpend !kind !unbudgetedSteps = do
         -- See Note [Structure of the step counter]
-        let !ix = fromIntegral $ fromEnum kind
-            !unbudgetedSteps' = overIndex 7 (+1) $ overIndex ix (+1) unbudgetedSteps
+        let !idx = fromIntegral $ fromEnum kind
+            !unbudgetedSteps' = overIndex 7 (+1) $ overIndex idx (+1) unbudgetedSteps
             !unbudgetedStepsTotal = readArray unbudgetedSteps' 7
         -- There's no risk of overflow here, since we only ever increment the total
         -- steps by 1 and then check this condition.
