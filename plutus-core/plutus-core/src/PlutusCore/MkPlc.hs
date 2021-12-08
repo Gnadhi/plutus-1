@@ -40,6 +40,7 @@ module PlutusCore.MkPlc
     , mkIterApp
     , mkIterTyFun
     , mkIterLamAbs
+    , mkProdLamAbs
     , mkIterInst
     , mkIterTyAbs
     , mkIterTyApp
@@ -235,6 +236,17 @@ mkIterLamAbs
     -> term ann
 mkIterLamAbs args body =
     foldr (\(VarDecl ann name ty) acc -> lamAbs ann name ty acc) body args
+
+-- | Bind a list of variables via a product.
+mkProdLamAbs
+    :: TermLike term tyname name uni fun
+    => ann
+    -> name
+    -> [VarDecl tyname name uni fun ann]
+    -> term ann
+    -> term ann
+mkProdLamAbs ann name args body =
+    lamAbs ann name (TyProd ann (fmap _varDeclType args)) $ foldr (\(vd, i) acc -> termLet ann (Def vd (proj ann i (var ann name))) acc) body (zip args [0..])
 
 -- | Type abstract a list of names.
 mkIterTyAbs
