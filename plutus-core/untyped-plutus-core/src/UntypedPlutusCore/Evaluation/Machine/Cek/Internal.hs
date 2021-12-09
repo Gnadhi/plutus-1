@@ -24,6 +24,7 @@
 {-# LANGUAGE UndecidableInstances     #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# OPTIONS_GHC -ddump-simpl -ddump-to-file -dsuppress-uniques -dsuppress-coercions -dsuppress-type-applications -dsuppress-unfoldings -dsuppress-idinfo -dumpdir /tmp/dumps #-}
 
 module UntypedPlutusCore.Evaluation.Machine.Cek.Internal
     -- See Note [Compilation peculiarities].
@@ -608,14 +609,17 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- s ; ρ ▻ error A  ↦  <> A
     computeCek !_ !_ !_ (Error _) =
         throwing_ _EvaluationFailure
-    computeCek !unbudgetedSteps !ctx !env (Prod _ es) = case es of
-        []     -> returnCek unbudgetedSteps ctx $ VProd V.empty
-        t : ts -> do
-            let l = length es
-            emptyArr <- CekM $ MV.new l
-            computeCek unbudgetedSteps (FrameProd env 0 ts emptyArr ctx) env t
-    computeCek !unbudgetedSteps !ctx !env (Proj _ i t) =
-        computeCek unbudgetedSteps (FrameProj i ctx) env t
+    computeCek !unbudgetedSteps !ctx !env (Prod _ es) = do
+        !unbudgetedSteps' <- stepAndMaybeSpend BApply unbudgetedSteps
+        case es of
+            []     -> returnCek unbudgetedSteps ctx $ VProd V.empty
+            t : ts -> do
+                let l = length es
+                emptyArr <- CekM $ MV.new l
+                computeCek unbudgetedSteps' (FrameProd env 0 ts emptyArr ctx) env t
+    computeCek !unbudgetedSteps !ctx !env (Proj _ i t) = do
+        !unbudgetedSteps' <- stepAndMaybeSpend BApply unbudgetedSteps
+        computeCek unbudgetedSteps' (FrameProj i ctx) env t
 
     {- | The returning phase of the CEK machine.
     Returns 'EvaluationSuccess' in case the context is empty, otherwise pops up one frame
