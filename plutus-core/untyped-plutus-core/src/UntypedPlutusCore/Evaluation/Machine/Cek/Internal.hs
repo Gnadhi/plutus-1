@@ -205,7 +205,7 @@ data CekValue uni fun =
       (CekValEnv uni fun)    -- For discharging.
       !(BuiltinRuntime (CekValue uni fun))  -- The partial application and its costing function.
                                             -- Check the docs of 'BuiltinRuntime' for details.
-  | VProd !(V.Vector (CekValue uni fun))
+  | VProd {-# UNPACK #-} !(V.Vector (CekValue uni fun))
     deriving (Show)
 
 type CekValEnv uni fun = UniqueMap TermUnique (CekValue uni fun)
@@ -483,8 +483,8 @@ data Context uni fun s
     = FrameApplyFun !(CekValue uni fun) !(Context uni fun s)                         -- ^ @[V _]@
     | FrameApplyArg !(CekValEnv uni fun) (Term Name uni fun ()) !(Context uni fun s) -- ^ @[_ N]@
     | FrameForce !(Context uni fun s)                                               -- ^ @(force _)@
-    | FrameProd !(CekValEnv uni fun) !Int ![Term Name uni fun ()] !(MV.MVector s (CekValue uni fun))! (Context uni fun s)
-    | FrameProj Int !(Context uni fun s)
+    | FrameProd !(CekValEnv uni fun) {-# UNPACK #-} !Int ![Term Name uni fun ()] {-# UNPACK #-} !(MV.MVector s (CekValue uni fun))! (Context uni fun s)
+    | FrameProj {-# UNPACK #-} !Int !(Context uni fun s)
     | NoFrame
     --deriving (Show)
 
