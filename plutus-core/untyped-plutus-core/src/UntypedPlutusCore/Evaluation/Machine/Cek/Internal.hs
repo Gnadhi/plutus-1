@@ -77,6 +77,8 @@ import Data.Kind qualified as GHC
 import Data.Proxy
 import Data.Semigroup (stimes)
 import Data.Text (Text)
+import Data.Vector qualified as V
+import Data.Vector.Mutable qualified as MV
 import Data.Word64Array.Word8 hiding (toList)
 import Prettyprinter
 import Universe
@@ -203,7 +205,7 @@ data CekValue uni fun =
       (CekValEnv uni fun)    -- For discharging.
       !(BuiltinRuntime (CekValue uni fun))  -- The partial application and its costing function.
                                             -- Check the docs of 'BuiltinRuntime' for details.
-  | VProd !(Array Int (CekValue uni fun))
+  | VProd !(V.Vector (CekValue uni fun))
     deriving (Show)
 
 type CekValEnv uni fun = UniqueMap TermUnique (CekValue uni fun)
@@ -477,14 +479,14 @@ The context in which the machine operates.
 Morally, this is a stack of frames, but we use the "intrusive list" representation so that
 we can match on context and the top frame in a single, strict pattern match.
 -}
-data Context uni fun
-    = FrameApplyFun !(CekValue uni fun) !(Context uni fun)                         -- ^ @[V _]@
-    | FrameApplyArg !(CekValEnv uni fun) (Term Name uni fun ()) !(Context uni fun) -- ^ @[_ N]@
-    | FrameForce !(Context uni fun)                                               -- ^ @(force _)@
-    | FrameProd !(CekValEnv uni fun) ![Term Name uni fun ()] ![CekValue uni fun]! (Context uni fun)
-    | FrameProj Int !(Context uni fun)
+data Context uni fun s
+    = FrameApplyFun !(CekValue uni fun) !(Context uni fun s)                         -- ^ @[V _]@
+    | FrameApplyArg !(CekValEnv uni fun) (Term Name uni fun ()) !(Context uni fun s) -- ^ @[_ N]@
+    | FrameForce !(Context uni fun s)                                               -- ^ @(force _)@
+    | FrameProd !(CekValEnv uni fun) !Int ![Term Name uni fun ()] !(MV.MVector s (CekValue uni fun))! (Context uni fun s)
+    | FrameProj Int !(Context uni fun s)
     | NoFrame
-    deriving (Show)
+    --deriving (Show)
 
 toExMemory :: (Closed uni, uni `Everywhere` ExMemoryUsage) => CekValue uni fun -> ExMemory
 toExMemory = \case
@@ -557,7 +559,7 @@ evalBuiltinApp fun term env runtime@(BuiltinRuntime sch x cost) = case sch of
 enterComputeCek
     :: forall uni fun s
     . (Ix fun, PrettyUni uni fun, GivenCekReqs uni fun s, uni `Everywhere` ExMemoryUsage)
-    => Context uni fun
+    => Context uni fun s
     -> CekValEnv uni fun
     -> Term Name uni fun ()
     -> CekM uni fun s (Term Name uni fun ())
@@ -570,7 +572,7 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- 4. looks up a variable in the environment and calls 'returnCek' ('Var')
     computeCek
         :: WordArray
-        -> Context uni fun
+        -> Context uni fun s
         -> CekValEnv uni fun
         -> Term Name uni fun ()
         -> CekM uni fun s (Term Name uni fun ())
@@ -607,8 +609,11 @@ enterComputeCek = computeCek (toWordArray 0) where
     computeCek !_ !_ !_ (Error _) =
         throwing_ _EvaluationFailure
     computeCek !unbudgetedSteps !ctx !env (Prod _ es) = case es of
-        []     -> returnCek unbudgetedSteps ctx $ VProd $ array (0,0) []
-        t : ts -> computeCek unbudgetedSteps (FrameProd env ts [] ctx) env t
+        []     -> returnCek unbudgetedSteps ctx $ VProd V.empty
+        t : ts -> do
+            let l = length es
+            emptyArr <- CekM $ MV.new l
+            computeCek unbudgetedSteps (FrameProd env 0 ts emptyArr ctx) env t
     computeCek !unbudgetedSteps !ctx !env (Proj _ i t) =
         computeCek unbudgetedSteps (FrameProj i ctx) env t
 
@@ -623,7 +628,7 @@ enterComputeCek = computeCek (toWordArray 0) where
     -}
     returnCek
         :: WordArray
-        -> Context uni fun
+        -> Context uni fun s
         -> CekValue uni fun
         -> CekM uni fun s (Term Name uni fun ())
     --- Instantiate all the free variable of the resulting term in case there are any.
@@ -640,12 +645,13 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- FIXME: add rule for VBuiltin once it's in the specification.
     returnCek !unbudgetedSteps (FrameApplyFun fun ctx) arg =
         applyEvaluate unbudgetedSteps ctx fun arg
-    returnCek !unbudgetedSteps (FrameProd env todo done ctx) e =
-        let done' = e:done
-        in case todo of
-            -- TODO: more efficient
-            []     -> returnCek unbudgetedSteps ctx $ VProd $ listArray (0, length done' - 1) (reverse done')
-            t : ts -> computeCek unbudgetedSteps (FrameProd env ts done' ctx) env t
+    returnCek !unbudgetedSteps (FrameProd env nextIndex todo arr ctx) e = do
+        CekM $ MV.write arr nextIndex e
+        case todo of
+            []     -> do
+                res <- CekM $ V.unsafeFreeze arr
+                returnCek unbudgetedSteps ctx $ VProd res
+            t : ts -> computeCek unbudgetedSteps (FrameProd env (nextIndex+1) ts arr ctx) env t
     returnCek !unbudgetedSteps (FrameProj i ctx) p = case p of
         -- TODO: causes
         VProd es -> case es ^? ix i of
@@ -661,7 +667,7 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- if v is anything else, fail.
     forceEvaluate
         :: WordArray
-        -> Context uni fun
+        -> Context uni fun s
         -> CekValue uni fun
         -> CekM uni fun s (Term Name uni fun ())
     forceEvaluate !unbudgetedSteps !ctx (VDelay body env) = computeCek unbudgetedSteps ctx env body
@@ -691,7 +697,7 @@ enterComputeCek = computeCek (toWordArray 0) where
     -- If v is anything else, fail.
     applyEvaluate
         :: WordArray
-        -> Context uni fun
+        -> Context uni fun s
         -> CekValue uni fun   -- lhs of application
         -> CekValue uni fun   -- rhs of application
         -> CekM uni fun s (Term Name uni fun ())
