@@ -1,4 +1,3 @@
--- editorconfig-checker-disable-file
 module Main where
 
 import CreateBuiltinCostModel (createBuiltinCostModel)
@@ -9,6 +8,8 @@ import Options.Applicative
 import System.Directory
 import System.Exit
 import System.IO (hPutStrLn, stderr)
+
+import Language.R (defaultConfig, runRegion, withEmbeddedR)
 
 {- | This takes a CSV file of benchmark results for built-in functions, runs the R
    code in `models.R` to construct costing functions based on the benchmark
@@ -46,10 +47,12 @@ data Output = NamedOutput FilePath | StdOutput
 benchmarkFile :: Parser BenchmarkFile
 benchmarkFile = namedBenchmarkFile <|> pure defaultBenchmarkFile
 
--- | Parser for an input stream. If none is specified, default to stdin: this makes use in pipelines easier
+-- | Parser for an input stream. If none is specified, default to stdin:
+-- this makes use in pipelines easier
 namedBenchmarkFile :: Parser BenchmarkFile
 namedBenchmarkFile = BenchmarkFile <$> strOption
   (  long "csv"
+  <> short 'i'
   <> metavar "FILENAME"
   <> help "CSV file containing built-in function benchmark results")
 
@@ -65,7 +68,8 @@ namedRFile  = RFile <$> strOption
   <> help "The file containing the R modelling code" )
 
 
--- | Parser for an output stream. If none is specified, default to stdout: this makes use in pipelines easier
+-- | Parser for an output stream. If none is specified, default to stdout:
+-- this makes use in pipelines easier
 output :: Parser Output
 output = fileOutput <|> stdOutput <|> pure StdOutput
 
@@ -144,5 +148,5 @@ main = do
   (BenchmarkFile bmfile, RFile rfile, out) <- execParser arguments
   checkBenchmarkFile bmfile
   checkRFile rfile
-  model <- createBuiltinCostModel bmfile rfile
+  model <- withEmbeddedR defaultConfig $ runRegion $ createBuiltinCostModel bmfile rfile
   writeOutput out $ encodePretty' (defConfig { confCompare = \_ _-> EQ }) model

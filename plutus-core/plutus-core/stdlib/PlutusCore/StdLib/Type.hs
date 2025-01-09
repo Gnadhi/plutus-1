@@ -4,6 +4,7 @@
 {-# LANGUAGE DeriveAnyClass    #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE Rank2Types        #-}
+{-# LANGUAGE TupleSections     #-}
 
 module PlutusCore.StdLib.Type
     ( RecursiveType (..)
@@ -14,7 +15,7 @@ import PlutusPrelude
 
 import PlutusCore.Core
 import PlutusCore.MkPlc
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Pretty
 import PlutusCore.Quote
 
@@ -283,12 +284,13 @@ Read next: Note [Denormalization]
 -}
 
 {- Note [Denormalization]
-Originally, we were binding 'withSpine' and 'patN' (taken from the end of
-Note [Packing n-ary functors]) on the Plutus Core side and this resulted in huge unreadable types
-being produced. Now we bind 'withSpine', 'patN' and what 'withSpine' receives on the Haskell side,
-i.e. we use Haskell lambdas to bind variables and regular function application to eliminate those
-lambdas which allows us to defer type reduction business to Haskell.
-Here is how the definition of 'list' looks like:
+Originally, we were binding 'withSpine' and 'patN' (taken from the end of Note
+[Packing n-ary pattern functors semantically]) on the Plutus Core side and this
+resulted in huge unreadable types being produced. Now we bind 'withSpine',
+'patN' and what 'withSpine' receives on the Haskell side, i.e. we use Haskell
+lambdas to bind variables and regular function application to eliminate those
+lambdas which allows us to defer type reduction business to Haskell.  Here is
+how the definition of 'list' looks like:
 
     \(a :: *) -> ifix
         (\(rec :: ((* -> *) -> *) -> *) -> \(spine :: (* -> *) -> *) ->
@@ -375,7 +377,7 @@ The code constructing the data type itself:
     [a, b, interlist, r] <- traverse freshTyName ["a", "b", "interlist", "r"]
 
     -- Define some aliases.
-    let interlistBA = mkIterTyApp () (TyVar () interlist) [TyVar () b, TyVar () a]
+    let interlistBA = mkIterTyAppNoAnn (TyVar () interlist) [TyVar () b, TyVar () a]
         nilElimTy   = TyVar () r
         consElimTy  = mkIterTyFun () [TyVar () a, TyVar () b, interlistBA] $ TyVar () r)
 
@@ -508,7 +510,7 @@ instance Show IndicesLengthsMismatchException where
     show (IndicesLengthsMismatchException expected actual tyName) = concat
         [ "Wrong number of elements\n"
         , "expected: ", show expected, " , actual: ", show actual, "\n"
-        , "while constructing a ", displayPlcDef tyName
+        , "while constructing a ", displayPlc tyName
         ]
 
 -- | Get the kind of a data type having the kinds of its arguments.
@@ -544,8 +546,8 @@ getToSpine ann = do
 
     return $ \args ->
           TyLam ann dat (argKindsToDataKindN ann $ map _tyDeclKind args)
-        . mkIterTyApp ann (TyVar ann dat)
-        $ map _tyDeclType args
+        . mkIterTyApp (TyVar ann dat)
+        $ map ((ann,) . _tyDeclType) args
 
 -- | Pack a list of 'TyDecl's as a spine using the CPS trick.
 --

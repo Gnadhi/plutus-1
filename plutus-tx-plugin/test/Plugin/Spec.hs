@@ -10,6 +10,8 @@ import Plugin.Errors.Spec
 import Plugin.Functions.Spec
 import Plugin.Laziness.Spec
 import Plugin.NoTrace.Spec
+import Plugin.Optimization.Spec
+import Plugin.Patterns.Spec
 import Plugin.Primitives.Spec
 import Plugin.Profiling.Spec
 import Plugin.Strict.Spec
@@ -24,9 +26,11 @@ tests = testNested "Plugin" [
   , functions
   , laziness
   , noTrace
+  , optimization
   , errors
   , typeclasses
   , strict
   , profiling
   , coverage
+  , patterns
   ]

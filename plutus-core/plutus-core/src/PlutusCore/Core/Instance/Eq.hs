@@ -17,7 +17,7 @@ import PlutusPrelude
 import PlutusCore.Core.Type
 import PlutusCore.DeBruijn
 import PlutusCore.Eq
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Rename.Monad
 
 import Universe
@@ -57,6 +57,26 @@ deriving stock instance (GEq uni, Closed uni, uni `Everywhere` Eq, Eq fun, Eq an
 
 type EqRenameOf ren a = HasUniques a => a -> a -> EqRename ren
 
+{- Note [No catch-all]
+Catch-all clauses like @f _x = <...>@ have the disadvantage that if somebody adds a new constructor
+to the definition of the type of @_x@, then GHC will not warn us about @f@ potentially no longer
+being defined correctly. This is especially pronounced for equality checking functions, having
+
+    _ == _ = False
+
+as the last clause of '(==)' makes it much trickier to spot that a new clause needs to be added if
+the type of the arguments get extended with a new constructor. For this reason in equality checking
+functions we always match on the first argument exhaustively even if it means having a wall of
+
+    C1 == _ = False
+    C2 == _ = False
+    <...>
+    Cn == _ = False
+
+This way we get a warning from GHC about non-exhaustive pattern matching if the type of the
+arguments gets extended with additional constructors.
+-}
+
 -- See Note [Modulo alpha].
 -- See Note [Scope tracking]
 -- See Note [Side tracking]
@@ -86,9 +106,16 @@ eqTypeM (TyFun ann1 dom1 cod1) (TyFun ann2 dom2 cod2) = do
     eqM ann1 ann2
     eqTypeM dom1 dom2
     eqTypeM cod1 cod2
-eqTypeM (TyBuiltin ann1 bi1) (TyBuiltin ann2 bi2) = do
+eqTypeM (TyBuiltin ann1 someUni1) (TyBuiltin ann2 someUni2) = do
     eqM ann1 ann2
-    eqM bi1 bi2
+    eqM someUni1 someUni2
+eqTypeM (TySOP ann1 tyls1) (TySOP ann2 tyls2) = do
+    eqM ann1 ann2
+    case zipExact tyls1 tyls2 of
+        Just ps -> for_ ps $ \(ptys1, ptys2) -> case zipExact ptys1 ptys2 of
+          Just tys -> for_ tys $ \(ty1, ty2) -> eqTypeM ty1 ty2
+          Nothing  -> empty
+        Nothing -> empty
 eqTypeM TyVar{}     _ = empty
 eqTypeM TyLam{}     _ = empty
 eqTypeM TyForall{}  _ = empty
@@ -96,6 +123,7 @@ eqTypeM TyIFix{}    _ = empty
 eqTypeM TyApp{}     _ = empty
 eqTypeM TyFun{}     _ = empty
 eqTypeM TyBuiltin{} _ = empty
+eqTypeM TySOP{} _ = empty
 
 -- See Note [Modulo alpha].
 -- See Note [Scope tracking]
@@ -141,6 +169,20 @@ eqTermM (Constant ann1 con1) (Constant ann2 con2) = do
 eqTermM (Builtin ann1 bi1) (Builtin ann2 bi2) = do
     eqM ann1 ann2
     eqM bi1 bi2
+eqTermM (Constr ann1 ty1 i1 args1) (Constr ann2 ty2 i2 args2) = do
+    eqM ann1 ann2
+    eqTypeM ty1 ty2
+    eqM i1 i2
+    case zipExact args1 args2 of
+        Just ps -> for_ ps $ \(t1, t2) -> eqTermM t1 t2
+        Nothing -> empty
+eqTermM (Case ann1 ty1 a1 cs1) (Case ann2 ty2 a2 cs2) = do
+    eqM ann1 ann2
+    eqTypeM ty1 ty2
+    eqTermM a1 a2
+    case zipExact cs1 cs2 of
+        Just ps -> for_ ps $ \(t1, t2) -> eqTermM t1 t2
+        Nothing -> empty
 eqTermM LamAbs{}   _ = empty
 eqTermM TyAbs{}    _ = empty
 eqTermM IWrap{}    _ = empty
@@ -151,3 +193,5 @@ eqTermM TyInst{}   _ = empty
 eqTermM Var{}      _ = empty
 eqTermM Constant{} _ = empty
 eqTermM Builtin{}  _ = empty
+eqTermM Constr{}  _ = empty
+eqTermM Case{}  _ = empty

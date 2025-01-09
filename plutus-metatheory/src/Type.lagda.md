@@ -26,7 +26,11 @@ infix  9 S
 ## Imports
 
 ```
-open import Utils using (Kind;*;_⇒_;J;K)
+open import Data.Vec using (Vec)
+open import Data.List using (List)
+
+open import Utils using (Kind;J;K)
+open Kind
 ```
 
 ## Type contexts
@@ -77,12 +81,15 @@ scope.
 A type is either a type variable, a pi type, a function type, a
 lambda, an application, an iso-recursive type `μ`, a size, or a type
 constant (base type). Note that recursive types range over an
-arbitrary kind `k` which goes beyond standard iso-recursive types.
+arbitrary kind `k` which goes beyond standard iso-recursive types. Also note that `Π`,
+`⇒`, and `µ` are effectively base types as they live at kind `*`.
+
+The Sum of Products types are based on Agda's standard Vectors and Lists.
 
 ```
 data _⊢⋆_ : Ctx⋆ → Kind → Set
 
-open import Builtin.Constant.Type Ctx⋆ (_⊢⋆ *) using (TyCon)
+open import Builtin.Constant.Type using (TyCon)
 
 data _⊢⋆_ where
   ` : Φ ∋⋆ J
@@ -98,7 +105,7 @@ data _⊢⋆_ where
         ------
       → Φ ⊢⋆ *
 
-  ƛ : Φ ,⋆ K ⊢⋆ J 
+  ƛ : Φ ,⋆ K ⊢⋆ J
       -----------
     → Φ ⊢⋆ K ⇒ J
 
@@ -112,9 +119,19 @@ data _⊢⋆_ where
       ---------------------
     → Φ ⊢⋆ *
 
-  con : TyCon Φ
+  ^ : TyCon K
+      -------
+    → Φ ⊢⋆ K
+
+  con : Φ ⊢⋆ ♯
         ------
       → Φ ⊢⋆ *
+
+   -- Sum of Products
+  SOP : ∀{n} →
+        Vec (List (Φ ⊢⋆ *)) n
+        ----------------------
+     →  Φ ⊢⋆ *
 ```
 
 Let `A`, `B`, `C` range over types:

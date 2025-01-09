@@ -4,6 +4,10 @@ library(stringr, quietly=TRUE, warn.conflicts=FALSE)
 library(dplyr,   quietly=TRUE, warn.conflicts=FALSE)
 library(broom,   quietly=TRUE, warn.conflicts=FALSE)
 
+## Let's see any warnings immediately instead of them being saved up to surprise
+## us later on.
+options(warn=1)
+
 ## See Note [Creation of the Cost Model]
 
 ## This R code is used to analyse the data in `benching.csv` produced by
@@ -25,7 +29,7 @@ seconds.to.microseconds <- function(x) { x * 1e6 }
 ## Discard any datapoints whose execution time is greater than 1.5 times the
 ## interquartile range above the third quartile, as is done in boxplots.  In our
 ## benchmark results we occasionally get atypically large times which throw the
-## models off and discarding the outliers helps to get a reasonable model
+## models off and discarding the outliers helps to get a reasonable model.
 #
 ## This should only be used on data which can reasonably be assumed to be
 ## relatively uniformly distributed., and this depends on how the benchmarking
@@ -106,7 +110,41 @@ arity <- function(name) {
         "EqualsData" = 2,
         "MkPairData" = 2,
         "MkNilData" = 1,
-        "MkNilPairData" = 1
+        "MkNilPairData" = 1,
+        "Bls12_381_G1_add" = 2 ,
+        "Bls12_381_G1_neg" = 1,
+        "Bls12_381_G1_scalarMul" = 2,
+        "Bls12_381_G1_equal" = 2,
+        "Bls12_381_G1_hashToGroup" = 2,
+        "Bls12_381_G1_compress" = 1,
+        "Bls12_381_G1_uncompress" = 1,
+        "Bls12_381_G2_add" = 2,
+        "Bls12_381_G2_neg" = 1,
+        "Bls12_381_G2_scalarMul" = 2,
+        "Bls12_381_G2_equal" = 2,
+        "Bls12_381_G2_hashToGroup" = 2,
+        "Bls12_381_G2_compress" = 1,
+        "Bls12_381_G2_uncompress" = 1,
+        "Bls12_381_millerLoop" = 2,
+        "Bls12_381_mulMlResult" = 2,
+        "Bls12_381_finalVerify" = 2,
+        "Keccak_256" = 1,
+        "Blake2b_224" = 1,
+        "Ripemd_160" = 1,
+        "ExpModInteger" = 3,
+        "IntegerToByteString" = 3,
+        "ByteStringToInteger" = 2,
+        "AndByteString" = 3,
+        "OrByteString" = 3,
+        "XorByteString" = 3,
+        "ComplementByteString" = 1,
+        "ReadBit" = 2,
+        "WriteBits" = 2,
+        "ReplicateByte" = 2,
+        "ShiftByteString" = 2,
+        "RotateByteString" = 2,
+        "CountSetBits" = 1,
+        "FindFirstSetBit" = 1
         )
 }
 
@@ -120,10 +158,11 @@ get.bench.data <- function(path) {
         comment.char="#"
     )
 
-    benchname <- regex("([[:alnum:]_]+)/ExMemory (\\d+)(?:/ExMemory (\\d+))?(?:/ExMemory (\\d+))?")
-    ## We have benchmark names like "AddInteger/ExMemory 11/ExMemory 22".  This extracts the name
-    ## and up to three numbers, returning "NA" for any that are missing.  If we ever have builtins
-    ## with more than three arguments we'lll need to extend this and add names for the new arguments.
+    benchname <- regex("([[:alnum:]_]+)/(\\d+)(?:/(\\d+))?(?:/(\\d+))?")
+    ## We have benchmark names like "AddInteger/11/22", the numbers representing the sizes of
+    ## the inputs to the benchmark.  This extracts the name and up to three numbers, returning
+    ## "NA" for any that are missing.  If we ever have builtins with more than three arguments
+    ## we'll need to extend this and add names for the new arguments.
 
     ## FIXME: the benchmarks for Nop4, Nop5, and Nop6 do have more than three
     ## arguments, but we're not paying any attention to the extra ones because
@@ -159,7 +198,7 @@ filter.and.check.nonempty <- function (frame, fname) {
 
 }
 
-adjustModel <- function (m, fname) {
+adjustModel <- function (r, fname) {
     ## Given a linear model, check its coefficients and if any is negative then
     ## make it 1000 ps and issue a warning.  This is somewhat suspect but will
     ## prevent us from getting models which predict negative costs.  See also
@@ -174,13 +213,32 @@ adjustModel <- function (m, fname) {
         }
         else x
     }
-    v <- m$coefficients
-    m$coefficients <- mapply(ensurePositive, v, attr(v,"names"))
+    v <- r$model$coefficients
+    r$model$coefficients <- mapply(ensurePositive, v, attr(v,"names"))
     ## This will invalidate some of the information in the model (such as the
     ## residuals), but we don't use that anyway.  Maybe we should just return the
     ## vector of coefficients?
-    return (m)
+
+    if (exists("constant",where=r)) {
+       if (r$constant < 0) r$constant=0.2 ## 0.2 ms = 200000 ps
+    }
+    return (r)
 }
+
+adjustModels <- function(models) {
+    ## Given a list of named models, apply `adjustModel` to each entry to
+    ## ensure that all of the model coefficients are positive.  This is applied
+    ## to the entire list of models before returning them to the outside world.
+    adjustEntry <- function(name) {
+        adjustModel(models[[name]], sub("Model", "", name))
+    }
+    models2 <- lapply(names(models), adjustEntry)
+    names(models2) <- names(models)
+    # Can we just mutate the entries of `models` in place, leaving the names untouched?
+
+    return(models2)
+}
+
 
 ## Benchmark results for some functions involving Data exhibit a fan shape where
 ## all the data points lie above the x-axis but below some sloping straight line
@@ -255,6 +313,12 @@ fit.fan <- function(f, threshold=0.9, limit=20, do.plot=FALSE) {
 modelFun <- function(path) {
     data <- get.bench.data(path)
 
+    ## Pair the coefficients of a model together with a type tag and possibly
+    ## some other data.  We return one of these to Haskell for every builtin.
+    mk.result <- function(model, type, ...) {
+        list(type=type, model=model, ...)
+    }
+
     ## Look for a single entry with the given name and return the 't' value
     ## (ie, the mean execution time) for that entry.  If <name> occurs multiple
     ## times, return the mean value, and if it's not present return zero,
@@ -300,7 +364,8 @@ modelFun <- function(path) {
         args.overhead <- overhead[arity(fname)]
         mean.time <- mean(frame$t)
         if (mean.time > args.overhead) {
-            mutate(frame,across(c("t", "t.mean.lb", "t.mean.ub"), function(x) { x - args.overhead }))
+            f <- mutate(frame,across(c("t", "t.mean.lb", "t.mean.ub"), function(x) { x - args.overhead }))
+            return(f)
         }
         else {
             ## Sometimes the total time taken to run a builtin is less than the
@@ -313,7 +378,8 @@ modelFun <- function(path) {
 
             cat (sprintf ("* NOTE: mean time for %s was less than overhead (%.3f ms < %.3f ms): adjusted time set to %.1f ns\n",
                           fname, mean.time, args.overhead, default*1000));
-            mutate(frame,across(c("t", "t.mean.lb", "t.mean.ub"), function(x) { default }))
+            f <- mutate(frame,across(c("t", "t.mean.lb", "t.mean.ub"), function(x) { default }))
+            return(f)
         }
     }
 
@@ -323,9 +389,32 @@ modelFun <- function(path) {
             discard.upper.outliers () %>%
             discard.overhead ()
         m <- lm(t ~ 1, filtered)
-        adjustModel (m,fname)
+        return (mk.result(m, "constant_cost"))
     }
 
+   linearInX <- function (fname) {
+        filtered <- data %>%
+            filter.and.check.nonempty (fname) %>%
+            discard.overhead ()
+        m <- lm(t ~ x_mem, filtered)
+        return (mk.result(m, "linear_in_x"))
+   }
+
+   linearInY <- function (fname) {
+        filtered <- data %>%
+            filter.and.check.nonempty(fname) %>%
+            discard.overhead ()
+        m <- lm(t ~ y_mem, filtered)
+        return (mk.result(m, "linear_in_y"))
+   }
+
+   linearInZ <- function (fname) {
+        filtered <- data %>%
+            filter.and.check.nonempty(fname) %>%
+            discard.overhead ()
+        m <- lm(t ~ z_mem, filtered)
+        return (mk.result(m, "linear_in_z"))
+   }
 
     ##### Integers #####
 
@@ -335,9 +424,8 @@ modelFun <- function(path) {
             filter.and.check.nonempty (fname)  %>%
             discard.overhead ()
         m <- lm(t ~ pmax(x_mem, y_mem), filtered)
-        adjustModel (m, fname)
+        mk.result(m, "max_size")
     }
-
     subtractIntegerModel <- addIntegerModel
 
     multiplyIntegerModel <- {
@@ -346,8 +434,8 @@ modelFun <- function(path) {
             filter.and.check.nonempty(fname)  %>%
             filter(x_mem > 0 & y_mem > 0) %>%
             discard.overhead ()
-        m <- lm(t ~ I(x_mem + y_mem), filtered)
-        adjustModel (m, fname)
+        m <- lm(t ~ I(x_mem * y_mem), filtered)
+        mk.result(m,"multiplied_sizes")
     }
     ## We do want I(x+y) here ^: the cost is linear, but symmetric.
 
@@ -360,19 +448,34 @@ modelFun <- function(path) {
     ## a good fit.
     divideIntegerModel <- {
         fname <- "DivideInteger"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname)    %>%
+
+        data1 <- data %>%  ## Data on or above diagonal: effectively constant time.
+            filter.and.check.nonempty(fname) %>%
+            filter(x_mem > 0 & y_mem > 0) %>%
+            filter (x_mem <= y_mem) %>%
+            discard.overhead ()
+        constant = mean(data1$t)
+
+        data2 <- data %>%  ## Data below diagonal
+            filter.and.check.nonempty(fname) %>%
             filter(x_mem > 0 & y_mem > 0) %>%
             filter (x_mem > y_mem) %>%
             discard.overhead ()
-        m <- lm(t ~ I(x_mem * y_mem), filtered)
-        adjustModel(m,fname)
+        m <- lm(t ~ I(x_mem) + I(y_mem) + I(x_mem^2) + I(x_mem * y_mem) + I(y_mem^2), data2)
+
+        ## Re-use the above-diagonal cost as the minimum cost below the diagonal.  See Note
+        ## [Minimum values for two-variable quadratic costing functions].
+        mk.result(m, "const_above_diagonal", constant=constant, minimum=constant, subtype="quadratic_in_x_and_y")
     }
 
     quotientIntegerModel  <- divideIntegerModel
     remainderIntegerModel <- divideIntegerModel
     modIntegerModel       <- divideIntegerModel
+    expModIntegerModel    <- constantModel ("ExpModInteger")   # FIXME: stub
 
+
+    ## This could possibly be made constant away from the diagonal; it's harmless
+    ## to make it linear everywhere, but may overprice some comparisons a bit.
     equalsIntegerModel <- {
         fname <- "EqualsInteger"
         filtered <- data %>%
@@ -381,7 +484,7 @@ modelFun <- function(path) {
             filter (x_mem > 0) %>%
             discard.overhead ()
         m <- lm(t ~ pmin(x_mem, y_mem), filtered)
-        adjustModel(m,fname)
+        mk.result(m, "min_size")
     }
 
     lessThanIntegerModel <- {
@@ -392,7 +495,7 @@ modelFun <- function(path) {
             filter (x_mem > 0) %>%
             discard.overhead ()
         m <- lm(t ~ pmin(x_mem, y_mem), filtered)
-        adjustModel(m,fname)
+        mk.result(m, "min_size")
     }
 
     lessThanEqualsIntegerModel <- {
@@ -403,12 +506,14 @@ modelFun <- function(path) {
             filter (x_mem > 0) %>%
             discard.overhead ()
         m <- lm(t ~ pmin(x_mem, y_mem), filtered)
-        adjustModel(m,fname)
+        mk.result(m, "min_size")
     }
 
 
     ##### Bytestrings #####
 
+    ## Note that this is symmetrical in the arguments: a new bytestring is
+    ## created and the contents of both arguments are copied into it.
     appendByteStringModel <- {
         fname <- "AppendByteString"
         filtered <- data %>%
@@ -416,29 +521,24 @@ modelFun <- function(path) {
             filter(x_mem > 0 & y_mem > 0) %>%
             discard.overhead ()
         m <- lm(t ~ I(x_mem + y_mem), filtered)
-        adjustModel(m,fname)
+        mk.result(m, "added_sizes")
     }
-    ## Note that this is symmetrical in the arguments: a new bytestring is
-    ## created and the contents of both arguments are copied into it.
 
-    consByteStringModel  <- {
-        fname <- "ConsByteString"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ y_mem, filtered)
-        adjustModel(m,fname)
-    }
     ## Depends on the size of the second argument, which has to be copied into
     ## the destination.
+    consByteStringModel  <- linearInY ("ConsByteString")
 
-    sliceByteStringModel <- constantModel ("SliceByteString")
     ## Bytetrings are immutable arrays with a pointer to the start and a length.
-    ## This just adjusts the pointer and length.
+    ## SliceByteString just adjusts the pointer and length, so should be constant
+    ## cost.  We've kept the linear model for compatibility reasons.
+    sliceByteStringModel <- linearInZ ("SliceByteString")
 
     lengthOfByteStringModel <- constantModel ("LengthOfByteString")  ## Just returns a field
     indexByteStringModel    <- constantModel ("IndexByteString")     ## Constant-time array access
 
+    ## NOTE: We could also use const_off_diagonal here, but we have to keep
+    ## linear _on_diagonal for backward compatibility for the time being.
+    ## See Note [Backward compatibility for costing functions].
     equalsByteStringModel <- {
         fname <- "EqualsByteString"
         filtered <- data %>%
@@ -446,7 +546,12 @@ modelFun <- function(path) {
             filter(x_mem == y_mem) %>%
             discard.overhead ()
         m <- lm(t ~ x_mem, filtered)
-        adjustModel(m,fname)
+
+        constant <- min(filtered$t)
+        ## FIXME.  The `constant` value above is the off-diagonal cost, which we
+        ## don't collect benchmarking data for.  Collect some data and infer it.
+
+        mk.result(m, "linear_on_diagonal", constant=constant)
     }
 
     lessThanByteStringModel <- {
@@ -455,7 +560,7 @@ modelFun <- function(path) {
             filter.and.check.nonempty(fname) %>%
             discard.overhead ()
         m <- lm(t ~ pmin(x_mem, y_mem), filtered)
-        adjustModel(m,fname)
+        mk.result(m, "min_size")
     }
 
     lessThanEqualsByteStringModel <- lessThanByteStringModel  ## Check this!
@@ -463,64 +568,29 @@ modelFun <- function(path) {
 
     ###### Hashing functions #####
 
-    sha2_256Model <- {
-        fname <- "Sha2_256"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ x_mem, filtered)
-        adjustModel(m,fname)
-    }
-
-    sha3_256Model <- {
-        fname <- "Sha3_256"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-      m <- lm(t ~ x_mem, filtered)
-      adjustModel(m,fname)
-    }
-
-    blake2b_256Model <- {
-        fname <- "Blake2b_256"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-      m <- lm(t ~ x_mem, filtered)
-      adjustModel(m,fname)
-    }
-
+    sha2_256Model    <- linearInX ("Sha2_256")
+    sha3_256Model    <- linearInX ("Sha3_256")
+    blake2b_224Model <- linearInX ("Blake2b_224")
+    blake2b_256Model <- linearInX ("Blake2b_256")
+    keccak_256Model  <- linearInX ("Keccak_256")
+    ripemd_160Model  <- linearInX ("Ripemd_160")
 
     ###### Signature verification #####
 
     ## VerifyEd25519Signature in fact takes three arguments, but the first and
     ## third are of fixed size so we only gather benchmarking data for
     ## different sizes of the second argument (the message being signed).
-    verifyEd25519SignatureModel <- {
-        fname <- "VerifyEd25519Signature"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ y_mem, filtered)
-        adjustModel(m,fname)
-    }
+    verifyEd25519SignatureModel <- linearInY ("VerifyEd25519Signature")
 
     ## Similar to VerifyEd25519Signature.
-    verifySchnorrSecp256k1SignatureModel <- {
-        fname <- "VerifySchnorrSecp256k1Signature"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ y_mem, filtered)
-        adjustModel(m,fname)
-    }
+    verifySchnorrSecp256k1SignatureModel <- linearInY ("VerifySchnorrSecp256k1Signature")
 
     ## All of the arguments of VerifyEcdsaSecp256k1Signature are of fixed size.
     ## The "message" (usually a hash of the real message) is always 32 bytes
     ## long.
     verifyEcdsaSecp256k1SignatureModel <- constantModel ("VerifyEcdsaSecp256k1Signature")
 
-    
+
     ##### Strings #####
 
     appendStringModel <- {
@@ -530,9 +600,12 @@ modelFun <- function(path) {
             filter(x_mem > 0 & y_mem > 0)    %>%
             discard.overhead ()
         m <- lm(t ~ I(x_mem + y_mem), filtered)  ## Both strings are copied in full
-        adjustModel(m,fname)
+        mk.result(m, "added_sizes")
     }
 
+    ## NOTE: We could also use const_off_diagonal here, but we have to keep
+    ## linear _on_diagonal for backward compatibility for the time being.
+    ## See Note [Backward compatibility for costing functions].
     equalsStringModel <- {
         fname <- "EqualsString"
         filtered <- data %>%
@@ -540,27 +613,17 @@ modelFun <- function(path) {
             filter(x_mem == y_mem) %>%
             discard.overhead ()
         m <- lm(t ~ x_mem, filtered)
-        adjustModel(m,fname)
+
+        constant <- min(filtered$t)
+        ## FIXME.  The `constant` value above is the off-diagonal cost, which
+        ## we don't collect benchmarking data for.  We might want to collect
+        ## some data and infer it.
+
+        mk.result(m, "linear_on_diagonal", constant=constant)
     }
 
-    decodeUtf8Model <- {
-        fname <- "DecodeUtf8"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ x_mem, filtered)
-        adjustModel(m,fname)
-    }
-
-    encodeUtf8Model <- {
-        fname <- "EncodeUtf8"
-        filtered <- data %>%
-            filter.and.check.nonempty(fname) %>%
-            discard.overhead ()
-        m <- lm(t ~ x_mem, filtered)
-        adjustModel(m,fname)
-    }
-
+    decodeUtf8Model <- linearInX ("DecodeUtf8")
+    encodeUtf8Model <- linearInX ("EncodeUtf8")
 
     ##### Bool #####
 
@@ -625,14 +688,14 @@ modelFun <- function(path) {
         if (!identical(filtered$x_mem, filtered$y_mem))
             cat(sprintf ("* WARNING: x_mem and y_mem differ in %s: inferred model may be inaccurate\n", fname))
         m <- fit.fan(filtered)
-        v <- m$coefficients
+        v <- coefficients(m)
         names(v) <- c("(Intercept)", "pmin(x_mem, y_mem)")
         ## ^ Make it look like what the Haskell code's expecting. The space after the comma is important.
         m2 <- lm(t ~ pmin(x_mem, y_mem), filtered) # A model with the structure expected by CreateBuiltinCostModel.
         m2$coefficients <- v
         ## ^ The rest of the data in the model now becomes nonsensical, but we don't use it.
         ## FIXME: do something better.
-        adjustModel(m2,fname)
+        mk.result(m2, "min_size")
     }
 
     ## Data serialisation times are also non-uniform (as for equalsData).
@@ -640,7 +703,7 @@ modelFun <- function(path) {
         fname <- "SerialiseData"
         filtered <- data %>% filter.and.check.nonempty(fname)
         m <- fit.fan(filtered)
-        adjustModel(m,fname)
+        mk.result(m, "linear_in_x")
     }
 
 
@@ -650,14 +713,81 @@ modelFun <- function(path) {
     mkNilDataModel      <- constantModel ("MkNilData")
     mkNilPairDataModel  <- constantModel ("MkNilPairData")
 
-    list(
+    ##### BLS12_381 operations #####
+
+    bls12_381_G1_addModel            <- constantModel ("Bls12_381_G1_add")
+    bls12_381_G1_negModel            <- constantModel ("Bls12_381_G1_neg")
+    bls12_381_G1_scalarMulModel      <- linearInX     ("Bls12_381_G1_scalarMul")
+    bls12_381_G1_equalModel          <- constantModel ("Bls12_381_G1_equal")
+    bls12_381_G1_hashToGroupModel    <- linearInX     ("Bls12_381_G1_hashToGroup")
+    bls12_381_G1_compressModel       <- constantModel ("Bls12_381_G1_compress")
+    bls12_381_G1_uncompressModel     <- constantModel ("Bls12_381_G1_uncompress")
+    bls12_381_G2_addModel            <- constantModel ("Bls12_381_G2_add")
+
+    bls12_381_G2_negModel            <- constantModel ("Bls12_381_G2_neg")
+    bls12_381_G2_scalarMulModel      <- linearInX     ("Bls12_381_G2_scalarMul")
+    bls12_381_G2_equalModel          <- constantModel ("Bls12_381_G2_equal")
+    bls12_381_G2_hashToGroupModel    <- linearInX     ("Bls12_381_G2_hashToGroup")
+    bls12_381_G2_compressModel       <- constantModel ("Bls12_381_G2_compress")
+    bls12_381_G2_uncompressModel     <- constantModel ("Bls12_381_G2_uncompress")
+    bls12_381_millerLoopModel        <- constantModel ("Bls12_381_millerLoop")
+    bls12_381_mulMlResultModel       <- constantModel ("Bls12_381_mulMlResult")
+    bls12_381_finalVerifyModel       <- constantModel ("Bls12_381_finalVerify")
+
+    ##### Bitwise operations #####
+
+    ## If we give `integerToByteString` a width argument w > 0 and a small
+    ## integer n to be converted, the cost is based only on the size of n even
+    ## though w could be considerably larger and some work will be required to
+    ## pad the output to width w.  Experiments show that the padding cost is
+    ## negligible in comparison to the conversion cost, so it's safe to base the
+    ## cost purely on the size of n.
+    integerToByteStringModel <- {
+        fname <- "IntegerToByteString"
+        filtered <- data %>%
+            filter.and.check.nonempty(fname)
+        m <- lm(t ~ I(z_mem) + I(z_mem^2), filtered)
+        mk.result(m, "quadratic_in_z")
+    }
+
+    byteStringToIntegerModel <- {
+        fname <- "ByteStringToInteger"
+        filtered <- data %>%
+            filter.and.check.nonempty(fname)
+        m <- lm(t ~  I(y_mem) + I(y_mem^2), filtered)
+        mk.result(m, "quadratic_in_y")
+    }
+
+    andByteStringModel <- {
+        fname <- "AndByteString"
+        filtered <- data %>%
+            filter.and.check.nonempty(fname) %>%
+            discard.overhead ()
+        m <- lm(t ~ y_mem + z_mem, filtered)
+        mk.result(m, "linear_in_y_and_z")
+    }
+    orByteStringModel         <- andByteStringModel
+    xorByteStringModel        <- andByteStringModel
+
+    complementByteStringModel <- linearInX ("ComplementByteString")
+    readBitModel              <- constantModel ("ReadBit")
+    writeBitsModel            <- linearInY ("WriteBits")
+    ## ^ The Y value here is the length of the list of positions because we use ListCostedByLength
+    ## in the relevant costing benchmark.
+    replicateByteModel        <- linearInX ("ReplicateByte")
+    shiftByteStringModel      <- linearInX ("ShiftByteString")
+    rotateByteStringModel     <- linearInX ("RotateByteString")
+    countSetBitsModel         <- linearInX ("CountSetBits")
+    findFirstSetBitModel      <- linearInX ("FindFirstSetBit")
+
+
+##### Models to be returned to Haskell #####
+
+    models.for.adjustment <-
+        list (
         addIntegerModel                      = addIntegerModel,
         subtractIntegerModel                 = subtractIntegerModel,
         multiplyIntegerModel                 = multiplyIntegerModel,
-        divideIntegerModel                   = divideIntegerModel,
-        quotientIntegerModel                 = quotientIntegerModel,
-        remainderIntegerModel                = remainderIntegerModel,
-        modIntegerModel                      = modIntegerModel,
         equalsIntegerModel                   = equalsIntegerModel,
         lessThanIntegerModel                 = lessThanIntegerModel,
         lessThanEqualsIntegerModel           = lessThanEqualsIntegerModel,
@@ -671,7 +801,11 @@ modelFun <- function(path) {
         lessThanEqualsByteStringModel        = lessThanEqualsByteStringModel,
         sha2_256Model                        = sha2_256Model,
         sha3_256Model                        = sha3_256Model,
+        blake2b_224Model                     = blake2b_224Model,
         blake2b_256Model                     = blake2b_256Model,
+        keccak_256Model                      = keccak_256Model,
+        ripemd_160Model                      = ripemd_160Model,
+        expModIntegerModel                   = expModIntegerModel,
         verifyEd25519SignatureModel          = verifyEd25519SignatureModel,
         verifyEcdsaSecp256k1SignatureModel   = verifyEcdsaSecp256k1SignatureModel,
         verifySchnorrSecp256k1SignatureModel = verifySchnorrSecp256k1SignatureModel,
@@ -704,6 +838,51 @@ modelFun <- function(path) {
         mkPairDataModel                      = mkPairDataModel,
         mkNilDataModel                       = mkNilDataModel,
         mkNilPairDataModel                   = mkNilPairDataModel,
-        serialiseDataModel                   = serialiseDataModel
+        serialiseDataModel                   = serialiseDataModel,
+        bls12_381_G1_addModel                = bls12_381_G1_addModel,
+        bls12_381_G1_negModel                = bls12_381_G1_negModel,
+        bls12_381_G1_scalarMulModel          = bls12_381_G1_scalarMulModel,
+        bls12_381_G1_equalModel              = bls12_381_G1_equalModel,
+        bls12_381_G1_hashToGroupModel        = bls12_381_G1_hashToGroupModel,
+        bls12_381_G1_compressModel           = bls12_381_G1_compressModel,
+        bls12_381_G1_uncompressModel         = bls12_381_G1_uncompressModel,
+        bls12_381_G2_addModel                = bls12_381_G2_addModel,
+        bls12_381_G2_negModel                = bls12_381_G2_negModel,
+        bls12_381_G2_scalarMulModel          = bls12_381_G2_scalarMulModel,
+        bls12_381_G2_equalModel              = bls12_381_G2_equalModel,
+        bls12_381_G2_hashToGroupModel        = bls12_381_G2_hashToGroupModel,
+        bls12_381_G2_compressModel           = bls12_381_G2_compressModel,
+        bls12_381_G2_uncompressModel         = bls12_381_G2_uncompressModel,
+        bls12_381_millerLoopModel            = bls12_381_millerLoopModel,
+        bls12_381_mulMlResultModel           = bls12_381_mulMlResultModel,
+        bls12_381_finalVerifyModel           = bls12_381_finalVerifyModel,
+        integerToByteStringModel             = integerToByteStringModel,
+        byteStringToIntegerModel             = byteStringToIntegerModel,
+        andByteStringModel                   = andByteStringModel,
+        orByteStringModel                    = orByteStringModel,
+        xorByteStringModel                   = xorByteStringModel,
+        complementByteStringModel            = complementByteStringModel,
+        readBitModel                         = readBitModel,
+        writeBitsModel                       = writeBitsModel,
+        replicateByteModel                   = replicateByteModel,
+        shiftByteStringModel                 = shiftByteStringModel,
+        rotateByteStringModel                = rotateByteStringModel,
+        countSetBitsModel                    = countSetBitsModel,
+        findFirstSetBitModel                 = findFirstSetBitModel
+        )
+
+    ## The integer division functions have a complex costing behaviour that requires some negative
+    ## coefficients to get accurate results. Because of this they are excluded from adjustModels:
+    ## the Haskell code receives the raw model and takes care of the (unlikely) case when a negative
+    ## value is returned itself (using a minimm value returned from R as an extra parameter).  Any
+    ## other builtins which need a non-monotonic costing function should be treated similarly.
+
+    unadjusted.models <- list (
+        divideIntegerModel                   = divideIntegerModel,
+        quotientIntegerModel                 = quotientIntegerModel,
+        remainderIntegerModel                = remainderIntegerModel,
+        modIntegerModel                      = modIntegerModel
     )
+
+    return(c(adjustModels(models.for.adjustment), unadjusted.models))
 }

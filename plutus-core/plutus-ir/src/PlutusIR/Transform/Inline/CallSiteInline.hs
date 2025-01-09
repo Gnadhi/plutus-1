@@ -1,129 +1,156 @@
 {-# LANGUAGE ConstraintKinds  #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs            #-}
+{-# LANGUAGE LambdaCase       #-}
 {-# LANGUAGE TypeFamilies     #-}
 
-{-|
-Call site inlining machinery. For now there's only one part: inlining of fully applied functions.
-See ADR TODO for motivation. We inline fully applied functions if the cost and size are acceptable.
-See note [Inlining of fully applied functions].
+{- |
+Call site inlining machinery. We inline if the size of the inlined result is not larger.
+See Note [Inlining and beta reduction of functions].
 -}
-
 module PlutusIR.Transform.Inline.CallSiteInline where
 
-{- Note [Inlining of fully applied functions]
+import PlutusCore qualified as PLC
+import PlutusCore.Rename (rename)
+import PlutusCore.Rename.Internal (Dupable (Dupable))
+import PlutusIR.Analysis.Size (Size, termSize)
+import PlutusIR.Contexts
+import PlutusIR.Core
+import PlutusIR.Transform.Inline.Utils
+import PlutusIR.Transform.Substitute
 
-We inline if (1) a function is fully applied (2) if its cost and size are acceptable. We discuss
-each in detail below.
+{- Note [Inlining and beta reduction of functions]
 
-(1) What do we mean by "fully applied"?
+We inline if its cost and size are acceptable.
 
-Consider `let v = rhs in body`, in which `body` calls `v`.
+For size, we compare the sizes (in terms of AST nodes before and after the inlining and beta
+reduction), and inline only if it does not increase the size. In the above example, we count
+the number of AST nodes in `f a b` and in `a`. The latter is smaller, which means inlining
+reduces the size.
 
-We consider cases when `v` is a function/lambda abstraction(s). I.e.:
+We care about program size increases primarily because it
+affects the size of the serialized script, which appears on chain and must be paid for.
+This is different to many compilers which care about this also because e.g. larger ASTs
+slow down compilation. We care about this too, but the serialized size is the main driver for us.
 
-let v = \x1.\x2...\xn.VBody in body
+The number of AST nodes is an approximate rather than a precise measure. It correlates,
+but doesn't directly map to the size of the serialised script. Different kinds of AST nodes
+may take different number of bits to encode; in particular, a `Constant` node always
+counts as one AST node, but the constant in it can be of arbitrary size. Then, would it be
+better to use the size of the serialised term, instead of the number of AST nodes? Not
+necessarily, because other transformations, such as CSE, may change the size further;
+specifically, if a large constant occurs multiple times in a program, it may get CSE'd.
 
-In the `body`, where `v` is *called*,
-if it was given `n` arguments, then it is _fully applied_ in the `body`.
-We inline the call of the fully applied `v` in this case, i.e.,
-we replace `v` in the `body` with `rhs`. E.g.
+In general there's no reliable way to precisely predict the size impact of an inlining
+decision, and we believe the number of AST nodes is in fact a good approximation.
 
-let f = \x.\y -> x
-in
-  let z = f q
-  in f a b
+For cost, we check whether the RHS (in this example, `\x. \y -> x`) has a small cost.
+If the RHS has a non-zero arity, then the cost is always small (since a lambda or a type
+abstraction is already a value). This may not be the case if the arity is zero.
 
-becomes
+For effect-safety, we require: (1) the RHS be pure, i.e., evaluating it is guaranteed to
+not have side effects; (2) all arguments be pure, since otherwise it is unsafe to
+perform beta reduction.
 
-let f = \x.\y -> x
-in
-  let z = f q
-  in ((\x.\y -> x) a b)
-
-With beta reduction, it becomes:
-
-let f = \x.\y -> x
-in
-  let z = f q
-  in a (more accurately it becomes (let { x = a, y = b } in x))
-
-This is already a reduction in code size. However, because of this,
-our dead code elimination pass is able to further reduce the code to just `a`. Consider
-
-let f = \x.\y -> x
-    z = f q
-in f a b + z c
-
-Here we have a `f` that is fully applied (`f a b`), and so we inline it:
-
-let f = \x.\y -> x
-in
-  let z = f q
-  in a + z c
-
-We cannot eliminate the let-binding of `f` because it is not dead (it's called in `z`).
-We don't inline `z` because it's not a lambda abstraction, it's an application.
-
-To find out whether a function is fully applied,
-we first need to count the number of type/term lambda abstractions,
-so we know how many term/type arguments they have.
-
-We pattern match the _rhs_ with `LamAbs` or `TyAbs` (lambda abstraction for terms or types),
-and count the number of lambdas.
-Then, in the _body_, we check for term or type application (`Apply` or `TyInst`) of _v_.
-
-If _v_ is fully applied in the body, i.e., if
-
-1. the number of type lambdas equals the number of type arguments applied, and
-2. the number of term lambdas equals the number of term arguments applied, and
-
-we inline _v_, i.e., replace its occurrence with _rhs_ in the _body_.
-
-Below are some more examples:
-
-Example 1: function in body
-
-let f = \x . x
-in let g = \y . f
-   in g a
-
-`f` and `g` each has 1 lambda. However, `g`'s _body_ includes `f` which also has a lambda.
-Since we only count the number of lambdas, `g` is fully applied, and we inline.
-`g a` reduces to `f`, which reduces the amount of code. Again, this also opens up more dead code
-elimination opportunities.
-
-Example 2: function as an argument
-
-let id :: forall a . a -> a
-    id x = x
-in id {int -> int} (\x -> x +1)
-
-Here we have a type application for a function that takes one type variable.
-I.e., it's fully applied in terms of type.
-In terms of terms, `id` takes one argument, and is indeed applied to one.
-So `id` is fully applied! And we inline it.
-Inlining and reducing `id` reduces the amount of code, as desired.
-
-Example 3: function application in _RHS_
-
-let f = (\x.\y.x+y) 4
-in f 5
-
-With beta-reduction, `f` becomes `\y.4+y` and it has 1 lambda.
-The _body_ `f 5` is a fully applied function!
-We can reduce it to 4+5.
-
-(2) How do we decide whether cost and size are acceptable?
-
-We currently reuse the heuristics 'Utils.sizeIsAcceptable' and 'Utils.costIsAcceptable'
-that are used in 'UnconditionalInline'. For
-
-let v = \x1.\x2...\xn.VBody in body
-
-we check `VBody` with the above "acceptable" functions.
-Note that all `LamAbs` and `TyAbs` should have been
-counted out already so we should not immediately encounter those in `VBody`.
-Also, we currently reject `Constant` (has acceptable cost but not acceptable size).
-We may want to check their sizes instead of just rejecting them.
 -}
+
+{- | Apply the RHS of the given variable to the given arguments, and beta-reduce
+the application, if possible.
+-}
+applyAndBetaReduce ::
+  forall tyname name uni fun ann.
+  (InliningConstraints tyname name uni fun) =>
+  -- | The rhs of the variable, should have been renamed already
+  Term tyname name uni fun ann ->
+  -- | The arguments, already processed
+  AppContext tyname name uni fun ann ->
+  InlineM tyname name uni fun ann (Maybe (Term tyname name uni fun ann))
+applyAndBetaReduce rhs args0 = do
+  let go ::
+        Term tyname name uni fun ann ->
+        AppContext tyname name uni fun ann ->
+        InlineM tyname name uni fun ann (Maybe (Term tyname name uni fun ann))
+      go acc args = case (acc, args) of
+        (LamAbs _ann n _ty tm, TermAppContext arg _ args') -> do
+          safe <- safeToBetaReduce n arg acc
+          if safe -- we only do substitution if it is safe to beta reduce
+            then do
+              acc' <- do
+                termSubstNamesM -- substitute the term param with the arg in the function body
+                  -- rename before substitution to ensure global uniqueness (may not be needed but
+                  -- no harm in renaming just to be sure)
+                  (\tmName -> if tmName == n then Just <$> PLC.rename arg else pure Nothing)
+                  tm -- drop the beta reduced term lambda
+              go acc' args'
+            -- if it is not safe to beta reduce, just return the processed application
+            else pure . Just $ fillAppContext acc args
+        (TyAbs _ann n _kd tm, TypeAppContext arg _ args') -> do
+          acc' <-
+            termSubstTyNamesM -- substitute the type param with the arg
+              (\tyName -> if tyName == n then Just <$> PLC.rename arg else pure Nothing)
+              tm -- drop the beta reduced type lambda
+          go acc' args'
+        -- term/type argument mismatch, don't inline
+        (LamAbs{}, TypeAppContext{}) -> pure Nothing
+        (TyAbs{}, TermAppContext{}) -> pure Nothing
+        -- no more lambda abstraction, just return the processed application
+        (_, _) -> pure . Just $ fillAppContext acc args
+
+      -- Is it safe to turn `(\a -> body) arg` into `body [a := arg]`?
+      -- The criteria is the same as the criteria for inlining `a` in
+      -- `let !a = arg in body`.
+      safeToBetaReduce ::
+        -- `a`
+        name ->
+        -- `arg`
+        Term tyname name uni fun ann ->
+        -- the body `a` will be beta reduced in
+        Term tyname name uni fun ann ->
+        InlineM tyname name uni fun ann Bool
+      safeToBetaReduce = shouldUnconditionallyInline Strict
+  go rhs args0
+
+-- | Consider inlining a variable. For applications, consider whether to apply and beta reduce.
+callSiteInline ::
+  forall tyname name uni fun ann.
+  (InliningConstraints tyname name uni fun) =>
+  -- | The term size if it were not inlined.
+  Size ->
+  -- | The `Utils.VarInfo` of the variable (the head of the term).
+  InlineVarInfo tyname name uni fun ann ->
+  -- | The application context of the term, already processed.
+  AppContext tyname name uni fun ann ->
+  InlineM tyname name uni fun ann (Maybe (Term tyname name uni fun ann))
+callSiteInline processedTSize = go
+  where
+    go varInfo args = do
+        let
+          defAsInlineTerm = varRhs varInfo
+          inlineTermToTerm :: InlineTerm tyname name uni fun ann
+              -> Term tyname name uni fun ann
+          inlineTermToTerm (Done (Dupable var)) = var
+          -- extract out the rhs without renaming, we only rename
+          -- when we know there's substitution
+          headRhs = inlineTermToTerm defAsInlineTerm
+          -- The definition itself will be inlined, so we need to check that the cost
+          -- of that is acceptable. Note that we do _not_ check the cost of the _body_.
+          -- We would have paid that regardless.
+          -- Consider e.g. `let y = \x. f x`. We pay the cost of the `f x` at
+          -- every call site regardless. The work that is being duplicated is
+          -- the work for the lambda.
+          costIsOk = costIsAcceptable headRhs
+        -- check if binding is pure to avoid duplicated effects.
+        -- For strict bindings we can't accidentally make any effects happen less often
+        -- than it would have before, but we can make it happen more often.
+        -- We could potentially do this safely in non-conservative mode.
+        rhsPure <- isTermBindingPure (varStrictness varInfo) headRhs
+        if costIsOk && rhsPure then do
+          -- rename the rhs of the variable before any substitution
+          renamedRhs <- rename headRhs
+          applyAndBetaReduce renamedRhs args >>= \case
+            Just inlined -> do
+              let -- Inline only if the size is no bigger than not inlining.
+                  sizeIsOk = termSize inlined <= processedTSize
+              pure $ if sizeIsOk then Just inlined else Nothing
+            Nothing -> pure Nothing
+        else pure Nothing

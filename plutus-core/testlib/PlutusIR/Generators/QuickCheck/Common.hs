@@ -8,7 +8,7 @@ import PlutusCore.Generators.QuickCheck.Substitutions
 import PlutusCore.Generators.QuickCheck.Unification
 
 import PlutusCore.Default
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Quote (runQuoteT)
 import PlutusCore.Rename
 import PlutusIR
@@ -17,7 +17,7 @@ import PlutusIR.Error
 import PlutusIR.Subst
 import PlutusIR.TypeCheck
 
-import Control.Monad.Except
+import Control.Monad (void)
 import Data.Bifunctor
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map

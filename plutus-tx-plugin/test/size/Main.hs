@@ -12,59 +12,63 @@ import PlutusTx.Test
 import PlutusTx.TH (compile)
 import Prelude
 import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.Extras (runTestNested, testNested)
 
 main :: IO ()
-main = defaultMain . testGroup "Size regression tests" $ [
-  testGroup "Rational" [
-    testGroup "Eq" [
-      fitsInto "==" ratEq 55,
-      fitsInto "/=" ratNeq 63
-      ],
-    testGroup "Ord" [
-      fitsInto "compare" ratCompare 89,
-      fitsInto "<=" ratLe 38,
-      fitsInto ">=" ratGe 38,
-      fitsInto "<" ratLt 38,
-      fitsInto ">" ratGt 38,
-      fitsInto "max" ratMax 46,
-      fitsInto "min" ratMin 46
-      ],
-    testGroup "Additive" [
-      fitsInto "+" ratPlus 134,
-      fitsInto "zero" ratZero 7,
-      fitsInto "-" ratMinus 134,
-      fitsInto "negate (specialized)" ratNegate 20
-      ],
-    testGroup "Multiplicative" [
-      fitsInto "*" ratTimes 126,
-      fitsInto "one" ratOne 10,
-      fitsInto "scale" ratScale 100
-      ],
-    testGroup "Serialization" [
-      fitsInto "toBuiltinData" ratToBuiltin 33,
-      fitsInto "fromBuiltinData" ratFromBuiltin 411,
-      fitsInto "unsafeFromBuiltinData" ratUnsafeFromBuiltin 256
-      ],
-    testGroup "Construction" [
-      fitsInto "unsafeRatio" ratMkUnsafe 168,
-      fitsInto "ratio" ratMkSafe 264,
-      fitsInto "fromInteger" ratFromInteger 8
-      ],
-    testGroup "Other" [
-      fitsInto "numerator" ratNumerator 7,
-      fitsInto "denominator" ratDenominator 7,
-      fitsInto "round" ratRound 332,
-      fitsInto "truncate" ratTruncate 11,
-      fitsInto "properFraction" ratProperFraction 36,
-      fitsInto "recip" ratRecip 87,
-      fitsInto "abs (specialized)" ratAbs 58
-      ],
-    testGroup "Comparison" [
-      fitsUnder "negate" ("specialized", ratNegate) ("general", genNegate),
-      fitsUnder "abs" ("specialized", ratAbs) ("general", genAbs),
-      fitsUnder "scale" ("type class method", ratScale) ("equivalent in other primitives", genScale)
+main = defaultMain $ testGroup "Size regression tests"
+  [ runTestNested ["test", "size", "Golden"]
+      [ testNested "Rational"
+          [ testNested "Eq"
+              [ goldenSize "equal" ratEq
+              , goldenSize "not-equal" ratNeq
+              ]
+          , testNested "Ord"
+              [ goldenSize "compare" ratCompare
+              , goldenSize "less-than-equal" ratLe
+              , goldenSize "greater-than-equal" ratGe
+              , goldenSize "less-than" ratLt
+              , goldenSize "greater-than" ratGt
+              , goldenSize "max" ratMax
+              , goldenSize "min" ratMin
+              ]
+          , testNested "Additive"
+              [ goldenSize "plus" ratPlus
+              , goldenSize "zero" ratZero
+              , goldenSize "minus" ratMinus
+              , goldenSize "negate-specialized" ratNegate
+              ]
+          , testNested "Multiplicative"
+              [ goldenSize "times" ratTimes
+              , goldenSize "one" ratOne
+              , goldenSize "scale" ratScale
+              ]
+          , testNested "Serialization"
+              [ goldenSize "toBuiltinData" ratToBuiltin
+              , goldenSize "fromBuiltinData" ratFromBuiltin
+              , goldenSize "unsafeFromBuiltinData" ratUnsafeFromBuiltin
+              ]
+          , testNested "Construction"
+              [ goldenSize "unsafeRatio" ratMkUnsafe
+              , goldenSize "ratio" ratMkSafe
+              , goldenSize "fromInteger" ratFromInteger
+              ]
+          , testNested "Other"
+              [ goldenSize "numerator" ratNumerator
+              , goldenSize "denominator" ratDenominator
+              , goldenSize "round" ratRound
+              , goldenSize "truncate" ratTruncate
+              , goldenSize "properFraction" ratProperFraction
+              , goldenSize "recip" ratRecip
+              , goldenSize "abs-specialized" ratAbs
+              ]
+          ]
       ]
-    ]
+  , testGroup "Comparison"
+      [ fitsUnder "negate" ("specialized", ratNegate) ("general", genNegate)
+      , fitsUnder "abs" ("specialized", ratAbs) ("general", genAbs)
+      , fitsUnder "scale" ("type class method", ratScale)
+          ("equivalent in other primitives", genScale)
+      ]
   ]
 
 -- Compiled definitions

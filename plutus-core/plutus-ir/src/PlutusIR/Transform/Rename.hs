@@ -6,7 +6,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes            #-}
 {-# LANGUAGE TypeFamilies          #-}
-{-# LANGUAGE TypeOperators         #-}
 {-# LANGUAGE UndecidableInstances  #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
@@ -24,7 +23,7 @@ import PlutusIR
 import PlutusIR.Mark
 
 import PlutusCore qualified as PLC
-import PlutusCore.Name qualified as PLC
+import PlutusCore.Name.Unique qualified as PLC
 import PlutusCore.Rename.Internal qualified as PLC
 
 import Control.Monad.Reader
@@ -202,7 +201,7 @@ instance PLC.HasUniques (Term tyname name uni fun ann) => PLC.Rename (Term tynam
     rename = through markNonFreshTerm >=> PLC.runRenameT . renameTermM
 
 instance PLC.HasUniques (Term tyname name uni fun ann) => PLC.Rename (Program tyname name uni fun ann) where
-    rename (Program ann term) = Program ann <$> PLC.rename term
+    rename (Program ann v term) = Program ann v <$> PLC.rename term
 
 -- See Note [Renaming of constructors].
 -- | A wrapper around a function restoring some old context of the renamer.
@@ -377,9 +376,11 @@ renameTermM = \case
         IWrap x <$> PLC.renameTypeM pat <*> PLC.renameTypeM arg <*> renameTermM term
     Unwrap x term ->
         Unwrap x <$> renameTermM term
+    Constr x ty i es -> Constr x <$> PLC.renameTypeM ty <*> pure i <*> traverse renameTermM es
+    Case x ty arg cs -> Case x <$> PLC.renameTypeM ty <*> renameTermM arg <*> traverse renameTermM cs
 
 -- | Rename a 'Term' in the 'ScopedRenameM' monad.
 renameProgramM
     :: (MonadRename m, PLC.HasUniques (Term tyname name uni fun ann))
     => Program tyname name uni fun ann -> m (Program tyname name uni fun ann)
-renameProgramM (Program ann term) = Program ann <$> renameTermM term
+renameProgramM (Program ann v term) = Program ann v <$> renameTermM term

@@ -42,9 +42,14 @@ data MachineParameters machinecosts fun val =
     , builtinsRuntime :: BuiltinsRuntime fun val
     }
     deriving stock Generic
-    deriving anyclass (NFData, NoThunks)
+    deriving anyclass (NFData)
 
-{- Note [The equality constraint in mkMachineParameters]
+-- For some reason the generic instance gives incorrect nothunk errors,
+-- see https://github.com/input-output-hk/nothunks/issues/24
+instance (NoThunks machinecosts, Bounded fun, Enum fun) => NoThunks (MachineParameters machinecosts fun val) where
+  wNoThunks ctx (MachineParameters costs runtime) = allNoThunks [ noThunks ctx costs, noThunks ctx runtime ]
+
+{- Note [The CostingPart constraint in mkMachineParameters]
 Discharging the @CostingPart uni fun ~ builtincosts@ constraint in 'mkMachineParameters' causes GHC
 to fail to inline the function at its call site regardless of the @INLINE@ pragma and an explicit
 'inline' call.
@@ -78,9 +83,9 @@ mkMachineParameters ::
     , HasMeaningIn uni val
     , ToBuiltinMeaning uni fun
     )
-    => BuiltinVersion fun
+    => BuiltinSemanticsVariant fun
     -> CostModel machinecosts builtincosts
     -> MachineParameters machinecosts fun val
-mkMachineParameters ver (CostModel mchnCosts builtinCosts) =
-    MachineParameters mchnCosts (inline toBuiltinsRuntime ver builtinCosts)
+mkMachineParameters semvar (CostModel mchnCosts builtinCosts) =
+    MachineParameters mchnCosts (inline toBuiltinsRuntime semvar builtinCosts)
 {-# INLINE mkMachineParameters #-}

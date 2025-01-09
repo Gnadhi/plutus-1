@@ -1,9 +1,7 @@
--- editorconfig-checker-disable-file
 {-# LANGUAGE LambdaCase #-}
 
 module CriterionExtensions (criterionMainWith, BenchmarkingPhase(..)) where
 
-import Control.Monad (unless)
 import Control.Monad.Trans (liftIO)
 import Criterion.Internal (runAndAnalyse, runFixedIters)
 import Criterion.IO.Printf (printError, writeCsv)
@@ -64,7 +62,8 @@ initCsvFile phase cfg =
                  liftIO $ appendFile file $ "# Plutus Core cost model benchmark results\n"
                  liftIO $ appendFile file $ "# Started at " ++ show time ++ "\n"
                  writeCsv ("benchmark","t","t.mean.lb","t.mean.ub","t.sd","t.sd.lb", "t.sd.ub")
-              Continue -> pure ()  -- Criterion will append output to the CSV file specified in `cfg`.
+              -- Criterion will append output to the CSV file specified in `cfg`.
+              Continue -> pure ()
 
 {- | A modified version of Criterion's 'defaultMainWith' function. We want to be
    able to run different benchmarks with different time limits, but that doesn't
@@ -83,21 +82,23 @@ criterionMainWith phase defCfg bs =
       RunIters cfg iters matchType benches ->
           withConfig cfg $ do
             () <- initCsvFile phase cfg
-            shouldRun <- liftIO $ selectBenches matchType benches bsgroup
+            shouldRun <- liftIO $ selectBenches matchType benches
             runFixedIters iters shouldRun bsgroup
       Run cfg matchType benches ->
           withConfig cfg $ do
             () <- initCsvFile phase cfg
-            shouldRun <- liftIO $ selectBenches matchType benches bsgroup
+            shouldRun <- liftIO $ selectBenches matchType benches
             liftIO initializeTime
             runAndAnalyse shouldRun bsgroup
       where bsgroup = BenchGroup "" bs
 
-selectBenches :: MatchType -> [String] -> Benchmark -> IO (String -> Bool)
-selectBenches matchType benches bsgroup = do
+-- Select the benchmarks to be run.  If a pattern is specified on the command
+-- line then only the matching benchmarks will be run.  If there are no matching
+-- benchmarks then the command will stil succeed (with no error or warning), but
+-- nothing will be benchmarked.
+selectBenches :: MatchType -> [String] -> IO (String -> Bool)
+selectBenches matchType benches = do
   toRun <- either parseError return . makeMatcher matchType $ benches
-  unless (null benches || any toRun (benchNames bsgroup)) $
-    parseError "none of the specified names matches a benchmark"
   return toRun
 
 parseError :: String -> IO a

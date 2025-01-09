@@ -142,7 +142,7 @@ data TermG tyname name
     | WrapG (TermG tyname name)
     | UnWrapG (TypeG tyname) (Kind ()) (TypeG tyname) (TermG tyname name)
     | ErrorG (TypeG tyname)
-    deriving stock (Eq, Show)
+    deriving stock (Eq, Functor, Show)
 
 deriveBifunctor ''TermG
 deriveEnumerable ''TermG
@@ -383,6 +383,8 @@ instance Check (TypeG n) TermConstantG where
   check _                          _                 = false
 
 
+-- | DEPRECATED: No Need to Update for a new Builtin.
+-- NEAT tests are useless for builtins, see https://github.com/IntersectMBO/plutus/issues/6075
 defaultFunTypes :: Ord tyname => Map.Map (TypeG tyname) [DefaultFun]
 defaultFunTypes = Map.fromList [(TyFunG (TyBuiltinG TyIntegerG) (TyFunG (TyBuiltinG TyIntegerG) (TyBuiltinG TyIntegerG))
                    ,[AddInteger,SubtractInteger,MultiplyInteger,DivideInteger,QuotientInteger,RemainderInteger,ModInteger])
@@ -399,7 +401,7 @@ defaultFunTypes = Map.fromList [(TyFunG (TyBuiltinG TyIntegerG) (TyFunG (TyBuilt
                   ,(TyFunG (TyBuiltinG TyByteStringG) (TyFunG (TyBuiltinG TyIntegerG) (TyBuiltinG TyIntegerG))
                    ,[IndexByteString])
                   ,(TyFunG (TyBuiltinG TyByteStringG) (TyBuiltinG TyByteStringG)
-                   ,[Sha2_256,Sha3_256,Blake2b_256])
+                   ,[Sha2_256,Sha3_256,Blake2b_224,Blake2b_256,Keccak_256,Ripemd_160])
                   ,(TyFunG (TyBuiltinG TyByteStringG) (TyFunG (TyBuiltinG TyByteStringG) (TyFunG (TyBuiltinG TyByteStringG) (TyBuiltinG TyBoolG)))
                    ,[VerifyEd25519Signature])
                   ,(TyFunG (TyBuiltinG TyByteStringG) (TyFunG (TyBuiltinG TyByteStringG) (TyBuiltinG TyBoolG))

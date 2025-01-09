@@ -10,34 +10,50 @@ module Type.RenamingSubstitution where
 ## Imports
 
 ```
+open import Data.Fin using (Fin;zero;suc)
+open import Data.Vec using (Vec;[];_∷_;lookup)
+open import Data.List using (List;[];_∷_)
 open import Function using (id;_∘_)
 open import Relation.Binary.PropositionalEquality
   using (_≡_; refl; cong; cong₂; trans; sym)
-  renaming (subst to substEq) 
+  renaming (subst to substEq)
 
 open import Utils using (*;J;K)
-open import Type using (Ctx⋆;_,⋆_;Φ;Ψ;_⊢⋆_;_∋⋆_;S;Z)
+open import Type using (Ctx⋆;_,⋆_;∅;Φ;Ψ;_⊢⋆_;_∋⋆_;S;Z)
 open _⊢⋆_
-open import Builtin.Constant.Type Ctx⋆ (_⊢⋆ *) using (TyCon)
-open TyCon
 ```
 
 ## Type renaming
 
-A type renaming is a mapping of type variables to type variables.
+Types can contain functions and as such are subject to a nontrivial equality relation. To
+explain the computation equation (the β-rule) we need to define substitution for a single
+type variable in a type. A type renaming is a function from type variables in one context to
+type variables in another. We only need the ability to
+introduce new variable on the right hand side of the context. The simplicity of the
+definition makes it easy to work with and we get some properties for free that we would
+have to pay for with a first order representation, such as not needing to define a lookup
+function, and we inherit the properties of functions provided by η-equality, such as
+associativity of composition, for free. Note that even though
+renamings are functions we do not require our metatheory (Agda’s type system) to support
+functional extensionality. We only ever need to make use of an equation
+between renamings on a point (a variable) and therefore need only a pointwise version
+of equality on functions to work with equality of renamings and substitutions.
 
 ```
 Ren : Ctx⋆ → Ctx⋆ → Set
 Ren Φ Ψ = ∀ {J} → Φ ∋⋆ J → Ψ ∋⋆ J
 ```
 
-Let `ρ` range of renamings.
+Let `ρ` range over renamings.
 ```
 variable
   ρ ρ' : Ren Φ Ψ
 ```
 
-Extending a type renaming — used when going under a binder.
+As we are going to push renamings through types we need to be able to push them
+under a binder. To do this safely the newly bound variable should remain untouched and
+other renamings should be shifted by one to accommodate this. (Note: this is
+called `lift⋆` in the [paper](https://plutus.cardano.intersectmbo.org/resources/plutus-core-spec.pdf#page=8) ).
 
 ```
 ext : Ren Φ Ψ
@@ -47,35 +63,41 @@ ext ρ Z      =  Z
 ext ρ (S α)  =  S (ρ α)
 ```
 
-Apply a type renaming to a type.
+# Apply a type renaming to a type.
+
+This is defined by recursion on the type. Observe that we lift the renaming when
+we go under a binder and actually apply the renaming when we hit a variable.
+
 ```
 ren : Ren Φ Ψ
       -----------------------
     → ∀ {J} → Φ ⊢⋆ J → Ψ ⊢⋆ J
-
-renTyCon : Ren Φ Ψ
-            -----------------------
-          → TyCon Φ → TyCon Ψ
-          
-renTyCon ρ integer    = integer
-renTyCon ρ bytestring = bytestring
-renTyCon ρ string     = string
-renTyCon ρ unit       = unit
-renTyCon ρ bool       = bool
-renTyCon ρ (list A)   = list (ren ρ A)
-renTyCon ρ (pair A B) = pair (ren ρ A) (ren ρ B)
-renTyCon ρ Data       = Data
+ren-List : Ren Φ Ψ
+      -----------------------
+    → ∀ {J} → List (Φ ⊢⋆ J) → List (Ψ ⊢⋆ J)
+ren-VecList : Ren Φ Ψ
+      -----------------------
+    → ∀ {n J} → Vec (List (Φ ⊢⋆ J)) n → Vec (List (Ψ ⊢⋆ J)) n
 
 ren ρ (` α)       = ` (ρ α)
 ren ρ (Π B)       = Π (ren (ext ρ) B)
 ren ρ (A ⇒ B)     = ren ρ A ⇒ ren ρ B
 ren ρ (ƛ B)       = ƛ (ren (ext ρ) B)
-ren ρ (A · B)     = ren ρ A · ren ρ B
 ren ρ (μ A B)     = μ (ren ρ A) (ren ρ B)
-ren ρ (con c)   = con (renTyCon ρ c) 
+ren ρ (^ x)       = ^ x
+ren ρ (con c)     = con (ren ρ c)
+ren ρ (A · B)     = ren ρ A · ren ρ B
+ren ρ (SOP xss)   = SOP (ren-VecList ρ xss)
+
+ren-List ρ [] = []
+ren-List ρ (x ∷ xs) = ren ρ x ∷ ren-List ρ xs
+ren-VecList ρ [] = []
+ren-VecList ρ (xs ∷ xss) = ren-List ρ xs ∷ ren-VecList ρ xss
 ```
 
-Weakening is a special case of renaming.
+Weakening is a special case of renaming. We apply the renaming S which does double
+duty as the variable constructor, if we check the type of S we see that it is a renaming.
+Weakening shifts all the existing variables one place to the left in the context.
 
 ```
 weaken : Φ ⊢⋆ J
@@ -119,20 +141,14 @@ ren-cong : (∀ {J}(α : Φ ∋⋆ J) → ρ α ≡ ρ' α)
          → ∀{K}(A : Φ ⊢⋆ K)
            --------------------------------
          → ren ρ A ≡ ren ρ' A
-
-renTyCon-cong : (∀ {J}(α : Φ ∋⋆ J) → ρ α ≡ ρ' α)
-              → (c : TyCon Φ)
-                --------------------------------
-              → renTyCon ρ c ≡ renTyCon ρ' c
-
-renTyCon-cong p integer    = refl
-renTyCon-cong p bytestring = refl
-renTyCon-cong p string     = refl
-renTyCon-cong p unit       = refl
-renTyCon-cong p bool       = refl
-renTyCon-cong p (list A)   = cong list (ren-cong p A)
-renTyCon-cong p (pair A B) = cong₂ pair (ren-cong p A) (ren-cong p B)
-renTyCon-cong p Data       = refl
+ren-cong-List : (∀ {J}(α : Φ ∋⋆ J) → ρ α ≡ ρ' α)
+         → ∀{K}(As : List (Φ ⊢⋆ K))
+           --------------------------------
+         → ren-List ρ As ≡ ren-List ρ' As
+ren-cong-VecList : (∀ {J}(α : Φ ∋⋆ J) → ρ α ≡ ρ' α)
+         → ∀{n K}(Tss : Vec (List (Φ ⊢⋆ K)) n)
+           --------------------------------
+         → ren-VecList ρ Tss ≡ ren-VecList ρ' Tss
 
 ren-cong p (` α)   = cong ` (p α)
 ren-cong p (Π A)   = cong Π (ren-cong (ext-cong p) A)
@@ -140,7 +156,14 @@ ren-cong p (A ⇒ B) = cong₂ _⇒_ (ren-cong p A) (ren-cong p B)
 ren-cong p (ƛ A)   = cong ƛ (ren-cong (ext-cong p) A)
 ren-cong p (A · B) = cong₂ _·_ (ren-cong p A) (ren-cong p B)
 ren-cong p (μ A B) = cong₂ μ (ren-cong p A) (ren-cong p B)
-ren-cong p (con c) = cong con (renTyCon-cong p c)
+ren-cong p (^ x)   = refl
+ren-cong p (con c) = cong con (ren-cong p c)
+ren-cong p (SOP xss) = cong SOP (ren-cong-VecList p xss)
+
+ren-cong-List p [] = refl
+ren-cong-List p (x ∷ xs) = cong₂ _∷_ (ren-cong p x) (ren-cong-List p xs)
+ren-cong-VecList p [] = refl
+ren-cong-VecList p (xs ∷ xss) = cong₂ _∷_ (ren-cong-List p xs) (ren-cong-VecList p xss)
 ```
 
 First functor law for `ren`
@@ -149,26 +172,29 @@ First functor law for `ren`
 ren-id : (A : Φ ⊢⋆ J)
          ------------
        → ren id A ≡ A
+ren-id-List :
+         (As : List (Φ ⊢⋆ J))
+         --------------------
+       → ren-List id As ≡ As
+ren-id-VecList : ∀{n}
+         (Tss : Vec (List (Φ ⊢⋆ J)) n)
+         --------------------
+       → ren-VecList id Tss ≡ Tss
 
-renTyCon-id : (c : TyCon Φ)
-              -----------------
-            → renTyCon id c ≡ c
-renTyCon-id integer    = refl
-renTyCon-id bytestring = refl
-renTyCon-id string     = refl
-renTyCon-id unit       = refl
-renTyCon-id bool       = refl
-renTyCon-id (list A)   = cong list (ren-id A)
-renTyCon-id (pair A B) = cong₂ pair (ren-id A) (ren-id B)
-renTyCon-id Data       = refl
+ren-id (` α)     = refl
+ren-id (Π A)     = cong Π (trans (ren-cong ext-id A) (ren-id A))
+ren-id (A ⇒ B)   = cong₂ _⇒_(ren-id A) (ren-id B)
+ren-id (ƛ A)     = cong ƛ (trans (ren-cong ext-id A) (ren-id A))
+ren-id (A · B)   = cong₂ _·_ (ren-id A) (ren-id B)
+ren-id (μ A B)   = cong₂ μ (ren-id A) (ren-id B)
+ren-id (^ x)     = refl
+ren-id (con c)   = cong con (ren-id c)
+ren-id (SOP xss) = cong SOP (ren-id-VecList xss)
 
-ren-id (` α)   = refl
-ren-id (Π A)   = cong Π (trans (ren-cong ext-id A) (ren-id A))
-ren-id (A ⇒ B) = cong₂ _⇒_(ren-id A) (ren-id B)
-ren-id (ƛ A)   = cong ƛ (trans (ren-cong ext-id A) (ren-id A))
-ren-id (A · B) = cong₂ _·_ (ren-id A) (ren-id B)
-ren-id (μ A B) = cong₂ μ (ren-id A) (ren-id B)
-ren-id (con c) = cong con (renTyCon-id c)
+ren-id-List [] = refl
+ren-id-List (x ∷ xs) = cong₂ _∷_ (ren-id x) (ren-id-List xs)
+ren-id-VecList [] = refl
+ren-id-VecList (xs ∷ xss) = cong₂ _∷_ (ren-id-List xs) (ren-id-VecList xss)
 ```
 
 Second functor law for `ext`
@@ -187,32 +213,33 @@ Second functor law for `ren`
 ren-comp : ∀{J}(A : Φ ⊢⋆ J)
            ---------------------------------
          → ren (ρ ∘ ρ') A ≡ ren ρ (ren ρ' A)
-
-renTyCon-comp : (c : TyCon Φ)
-                -------------------------------------------
-              → renTyCon (ρ ∘ ρ') c ≡ renTyCon ρ (renTyCon ρ' c)
-
-renTyCon-comp integer    = refl
-renTyCon-comp bytestring = refl
-renTyCon-comp string     = refl
-renTyCon-comp unit       = refl
-renTyCon-comp bool       = refl
-renTyCon-comp (list A)   = cong list (ren-comp A)
-renTyCon-comp (pair A B) = cong₂ pair (ren-comp A) (ren-comp B)
-renTyCon-comp Data       = refl
-
+ren-comp-List : ∀{J}(As : List (Φ ⊢⋆ J))
+           ---------------------------------
+         → ren-List (ρ ∘ ρ') As ≡ ren-List ρ (ren-List ρ' As)
+ren-comp-VecList : ∀{n J}(Tss : Vec (List (Φ ⊢⋆ J)) n)
+           -------------------------------------------
+         → ren-VecList (ρ ∘ ρ') Tss ≡ ren-VecList ρ (ren-VecList ρ' Tss)
 ren-comp (` x)   = refl
 ren-comp (Π A)   = cong Π (trans (ren-cong ext-comp A) (ren-comp A))
 ren-comp (A ⇒ B) = cong₂ _⇒_ (ren-comp A) (ren-comp B)
 ren-comp (ƛ A)   = cong ƛ (trans (ren-cong ext-comp A) (ren-comp A))
 ren-comp (A · B) = cong₂ _·_ (ren-comp A) (ren-comp B)
 ren-comp (μ A B) = cong₂ μ (ren-comp A) (ren-comp B)
-ren-comp (con c) = cong con (renTyCon-comp c)
+ren-comp (^ x)   = refl
+ren-comp (con c) = cong con (ren-comp c)
+ren-comp (SOP xss) = cong SOP (ren-comp-VecList xss)
+
+ren-comp-List [] = refl
+ren-comp-List (x ∷ xs) = cong₂ _∷_ (ren-comp x) (ren-comp-List xs)
+ren-comp-VecList [] = refl
+ren-comp-VecList (xs ∷ xss) = cong₂ _∷_ (ren-comp-List xs) (ren-comp-VecList xss)
 ```
 
 ## Type substitution
 
-A type substitution is a mapping of type variables to types.
+A type substitution is a mapping of type variables to types. Much of this section
+mirrors functions in the Type section above, so the explainations and design intent
+are the same. There are [Fusion Proofs](#fusion-proofs) below.
 
 ```
 Sub : Ctx⋆ → Ctx⋆ → Set
@@ -225,7 +252,7 @@ variable
   σ σ' : Sub Φ Ψ
 ```
 
-Extending a type substitution — used when going under a binder.
+Extending a type substitution — used when going under a binder. (This is called `lifts` in the [paper](https://plutus.cardano.intersectmbo.org/resources/plutus-core-spec.pdf#page=8) ).
 
 ```
 exts : Sub Φ Ψ
@@ -241,19 +268,13 @@ Apply a type substitution to a type.
 sub : Sub Φ Ψ
       -----------------------
     → ∀ {J} → Φ ⊢⋆ J → Ψ ⊢⋆ J
+sub-List : Sub Φ Ψ
+      -----------------------
+    → ∀ {J} → List (Φ ⊢⋆ J) → List (Ψ ⊢⋆ J)
+sub-VecList : Sub Φ Ψ
+      -----------------------
+    → ∀ {n J} → Vec (List (Φ ⊢⋆ J)) n → Vec (List (Ψ ⊢⋆ J)) n
 
-subTyCon : Sub Φ Ψ
-           -----------------------
-         → TyCon Φ → TyCon Ψ
-
-subTyCon σ integer    = integer
-subTyCon σ bytestring = bytestring
-subTyCon σ string     = string
-subTyCon σ unit       = unit
-subTyCon σ bool       = bool
-subTyCon σ (list A)   = list (sub σ A)
-subTyCon σ (pair A B) = pair (sub σ A) (sub σ B)
-subTyCon σ Data       = Data
 
 sub σ (` α)   = σ α
 sub σ (Π B)   = Π (sub (exts σ) B)
@@ -261,7 +282,14 @@ sub σ (A ⇒ B) = sub σ A ⇒ sub σ B
 sub σ (ƛ B)   = ƛ (sub (exts σ) B)
 sub σ (A · B) = sub σ A · sub σ B
 sub σ (μ A B) = μ (sub σ A) (sub σ B)
-sub σ (con c) = con (subTyCon σ c)
+sub σ (^ x)   = ^ x
+sub σ (con c) = con (sub σ c)
+sub σ (SOP xss) = SOP (sub-VecList σ xss)
+
+sub-List σ [] = []
+sub-List σ (x ∷ xs) = sub σ x ∷ sub-List σ xs
+sub-VecList σ [] = []
+sub-VecList σ (xs ∷ xss) = sub-List σ xs ∷ sub-VecList σ xss
 ```
 
 Extend a substitution with an additional type (analogous to `cons` for
@@ -279,7 +307,7 @@ sub-cons f A (S x) = f x
 A special case is substitution a type for the outermost free variable:
 ```
 _[_] : Φ ,⋆ K ⊢⋆ J
-     → Φ ⊢⋆ K 
+     → Φ ⊢⋆ K
        -----------
      → Φ ⊢⋆ J
 B [ A ] =  sub (sub-cons ` A) B
@@ -292,7 +320,7 @@ Extending the identity substitution yields the identity substitution
 ```
 exts-id : (α : Φ ,⋆ K ∋⋆ J)
           -----------------
-        → exts ` α ≡ ` α 
+        → exts ` α ≡ ` α
 exts-id Z     = refl
 exts-id (S α) = refl
 ```
@@ -315,19 +343,14 @@ sub-cong : (∀ {J}(α : Φ ∋⋆ J) → σ α ≡ σ' α)
          → ∀{K}(A : Φ ⊢⋆ K)
            --------------------------------
          → sub σ A ≡ sub σ' A
-
-subTyCon-cong : (∀ {J}(α : Φ ∋⋆ J) → σ α ≡ σ' α)
-         → (c : TyCon Φ)
+sub-cong-List : (∀ {J}(α : Φ ∋⋆ J) → σ α ≡ σ' α)
+         → ∀{K}(As : List (Φ ⊢⋆ K))
            --------------------------------
-         → subTyCon σ c ≡ subTyCon σ' c
-subTyCon-cong p integer    = refl
-subTyCon-cong p bytestring = refl
-subTyCon-cong p string     = refl
-subTyCon-cong p unit       = refl
-subTyCon-cong p bool       = refl
-subTyCon-cong p (list A)   = cong list (sub-cong p A)
-subTyCon-cong p (pair A B) = cong₂ pair (sub-cong p A) (sub-cong p B)
-subTyCon-cong p Data       = refl
+         → sub-List σ As ≡ sub-List σ' As
+sub-cong-VecList : (∀ {J}(α : Φ ∋⋆ J) → σ α ≡ σ' α)
+         → ∀{n K}(Tss : Vec (List (Φ ⊢⋆ K)) n)
+           --------------------------------
+         → sub-VecList σ Tss ≡ sub-VecList σ' Tss
 
 sub-cong p (` α)   = p α
 sub-cong p (Π A)   = cong Π (sub-cong (exts-cong p) A)
@@ -335,7 +358,14 @@ sub-cong p (A ⇒ B) = cong₂ _⇒_ (sub-cong p A) (sub-cong p B)
 sub-cong p (ƛ A)   = cong ƛ (sub-cong (exts-cong p) A)
 sub-cong p (A · B) = cong₂ _·_ (sub-cong p A) (sub-cong p B)
 sub-cong p (μ A B) = cong₂ μ (sub-cong p A) (sub-cong p B)
-sub-cong p (con c) = cong con (subTyCon-cong p c)
+sub-cong p (^ x)   = refl
+sub-cong p (con c) = cong con (sub-cong p c)
+sub-cong p (SOP xss) = cong SOP (sub-cong-VecList p xss)
+
+sub-cong-List p [] = refl
+sub-cong-List p (x ∷ xs) = cong₂ _∷_ (sub-cong p x) (sub-cong-List p xs)
+sub-cong-VecList p [] = refl
+sub-cong-VecList p (xs ∷ xss) = cong₂ _∷_ (sub-cong-List p xs) (sub-cong-VecList p xss)
 ```
 
 First relative monad `law` for `sub`
@@ -344,19 +374,14 @@ First relative monad `law` for `sub`
 sub-id : (A : Φ ⊢⋆ J)
          ------------
        → sub ` A ≡ A
-
-subTyCon-id : (c : TyCon Φ)
-              ------------
-            → subTyCon ` c ≡ c
-
-subTyCon-id integer    = refl
-subTyCon-id bytestring = refl
-subTyCon-id string     = refl
-subTyCon-id unit       = refl
-subTyCon-id bool       = refl
-subTyCon-id (list A)   = cong  list (sub-id A)
-subTyCon-id (pair A B) = cong₂ pair (sub-id A) (sub-id B)
-subTyCon-id Data       = refl
+sub-id-List :
+         (As : List (Φ ⊢⋆ J))
+         --------------------
+       → sub-List ` As ≡ As
+sub-id-VecList : ∀{n}
+         (Tss : Vec (List (Φ ⊢⋆ J)) n)
+         --------------------
+       → sub-VecList ` Tss ≡ Tss
 
 sub-id (` α)      = refl
 sub-id (Π A)      = cong Π (trans (sub-cong exts-id A) (sub-id A))
@@ -364,8 +389,16 @@ sub-id (A ⇒ B)    = cong₂ _⇒_ (sub-id A) (sub-id B)
 sub-id (ƛ A)      = cong ƛ (trans (sub-cong exts-id A) (sub-id A))
 sub-id (A · B)    = cong₂ _·_ (sub-id A) (sub-id B)
 sub-id (μ A B)    = cong₂ μ (sub-id A) (sub-id B)
-sub-id (con c)    = cong con (subTyCon-id c)
+sub-id (^ x)      = refl
+sub-id (con c)    = cong con (sub-id c)
+sub-id (SOP xss)  = cong SOP (sub-id-VecList xss)
+
+sub-id-List [] = refl
+sub-id-List (x ∷ xs) = cong₂ _∷_ (sub-id x) (sub-id-List xs)
+sub-id-VecList [] = refl
+sub-id-VecList (xs ∷ xss) = cong₂ _∷_ (sub-id-List xs) (sub-id-VecList xss)
 ```
+## Fusion proofs
 
 Fusion of `exts` and `ext`
 
@@ -383,27 +416,30 @@ Fusion for `sub` and `ren`
 sub-ren : ∀{J}(A : Φ ⊢⋆ J)
           -------------------------------
         → sub (σ ∘ ρ) A ≡ sub σ (ren ρ A)
+sub-ren-List :  ∀{J}
+          (As : List (Φ ⊢⋆ J))
+          -------------------------------
+        → sub-List (σ ∘ ρ) As ≡ sub-List σ (ren-List ρ As)
 
-subTyCon-renTyCon : (c : TyCon Φ)
-                    ----------------------------------------------
-                  → subTyCon (σ ∘ ρ) c ≡ subTyCon σ (renTyCon ρ c)
+sub-ren-VecList :  ∀{n J} →
+          (Tss : Vec (List (Φ ⊢⋆ J)) n)
+          -------------------------------
+        → sub-VecList (σ ∘ ρ) Tss ≡ sub-VecList σ (ren-VecList ρ Tss)
 
-subTyCon-renTyCon integer    = refl
-subTyCon-renTyCon bytestring = refl
-subTyCon-renTyCon string     = refl
-subTyCon-renTyCon unit       = refl
-subTyCon-renTyCon bool       = refl
-subTyCon-renTyCon (list A)   = cong list (sub-ren A)
-subTyCon-renTyCon (pair A B) = cong₂ pair (sub-ren A) (sub-ren B)
-subTyCon-renTyCon Data       = refl
+sub-ren (` α)     = refl
+sub-ren (Π A)     = cong Π (trans (sub-cong exts-ext A) (sub-ren A))
+sub-ren (A ⇒ B)   = cong₂ _⇒_ (sub-ren A) (sub-ren B)
+sub-ren (ƛ A)     = cong ƛ (trans (sub-cong exts-ext A) (sub-ren A))
+sub-ren (A · B)   = cong₂ _·_ (sub-ren A) (sub-ren B)
+sub-ren (μ A B)   = cong₂ μ (sub-ren A) (sub-ren B)
+sub-ren (^ x)     = refl
+sub-ren (con c)   = cong con (sub-ren c)
+sub-ren (SOP xss) = cong SOP (sub-ren-VecList xss)
 
-sub-ren (` α)   = refl
-sub-ren (Π A)   = cong Π (trans (sub-cong exts-ext A) (sub-ren A))
-sub-ren (A ⇒ B) = cong₂ _⇒_ (sub-ren A) (sub-ren B)
-sub-ren (ƛ A)   = cong ƛ (trans (sub-cong exts-ext A) (sub-ren A))
-sub-ren (A · B) = cong₂ _·_ (sub-ren A) (sub-ren B)
-sub-ren (μ A B) = cong₂ μ (sub-ren A) (sub-ren B)
-sub-ren (con c) = cong con (subTyCon-renTyCon c)
+sub-ren-List [] = refl
+sub-ren-List (x ∷ xs) = cong₂ _∷_ (sub-ren x) (sub-ren-List xs)
+sub-ren-VecList [] = refl
+sub-ren-VecList (xs ∷ xss) = cong₂ _∷_ (sub-ren-List xs) (sub-ren-VecList xss)
 ```
 
 Fusion for `exts` and `ext`
@@ -422,27 +458,32 @@ Fusion for `ren` and `sub`
 ren-sub : ∀{J}(A : Φ ⊢⋆ J)
           -----------------------------------
         → sub (ren ρ ∘ σ) A ≡ ren ρ (sub σ A)
+ren-sub-List : ∀ {J}
+          (As : List (Φ ⊢⋆ J))
+          ---------------------------------------------------------------
+        → sub-List (ren ρ ∘ σ) As ≡ ren-List ρ (sub-List σ As)
 
-renTyCon-subTyCon : (c : TyCon Φ)
-                    -----------------------------------
-                  → subTyCon (ren ρ ∘ σ) c ≡ renTyCon ρ (subTyCon σ c)
+ren-sub-VecList : ∀ {n J}
+          (Tss : Vec (List (Φ ⊢⋆ J)) n)
+          ---------------------------------------------------------------
+        → sub-VecList (ren ρ ∘ σ) Tss ≡ ren-VecList ρ (sub-VecList σ Tss)
 
-renTyCon-subTyCon integer    = refl
-renTyCon-subTyCon bytestring = refl
-renTyCon-subTyCon string     = refl
-renTyCon-subTyCon unit       = refl
-renTyCon-subTyCon bool       = refl
-renTyCon-subTyCon (list A)   = cong list (ren-sub A)
-renTyCon-subTyCon (pair A B) = cong₂ pair (ren-sub A) (ren-sub B) 
-renTyCon-subTyCon Data       = refl
 
-ren-sub (` α)   = refl
-ren-sub (Π A)   = cong Π (trans (sub-cong ren-ext-exts  A) (ren-sub A))
-ren-sub (A ⇒ B) = cong₂ _⇒_ (ren-sub A) (ren-sub B)
-ren-sub (ƛ A)   = cong ƛ (trans (sub-cong ren-ext-exts A) (ren-sub A))
-ren-sub (A · B) = cong₂ _·_ (ren-sub A) (ren-sub B)
-ren-sub (μ A B) = cong₂ μ (ren-sub A) (ren-sub B)
-ren-sub (con c) = cong con (renTyCon-subTyCon c)
+ren-sub (` α)     = refl
+ren-sub (Π A)     = cong Π (trans (sub-cong ren-ext-exts  A) (ren-sub A))
+ren-sub (A ⇒ B)   = cong₂ _⇒_ (ren-sub A) (ren-sub B)
+ren-sub (ƛ A)     = cong ƛ (trans (sub-cong ren-ext-exts A) (ren-sub A))
+ren-sub (A · B)   = cong₂ _·_ (ren-sub A) (ren-sub B)
+ren-sub (μ A B)   = cong₂ μ (ren-sub A) (ren-sub B)
+ren-sub (^ x)     = refl
+ren-sub (con c)   = cong con (ren-sub c)
+ren-sub (SOP xss) = cong SOP (ren-sub-VecList xss)
+
+ren-sub-List [] = refl
+ren-sub-List (x ∷ xs) = cong₂ _∷_ (ren-sub x) (ren-sub-List xs)
+
+ren-sub-VecList [] = refl
+ren-sub-VecList (xs ∷ xss) = cong₂ _∷_ (ren-sub-List xs) (ren-sub-VecList xss)
 ```
 
 Fusion of two `exts`
@@ -461,27 +502,31 @@ Fusion of substitutions/third relative monad law for `sub`
 sub-comp : ∀{J}(A : Φ ⊢⋆ J)
            -------------------------------------
          → sub (sub σ ∘ σ') A ≡ sub σ (sub σ' A)
+sub-com-List : ∀ {J}
+                (As : List (Φ ⊢⋆ J))
+                ------------------------------------------------------------------
+              → sub-List (sub σ ∘ σ') As ≡ sub-List σ (sub-List σ' As)
 
-subTyCon-comp : (c : TyCon Φ)
-                ----------------------------------------------------
-              → subTyCon (sub σ ∘ σ') c ≡ subTyCon σ (subTyCon σ' c)
+sub-com-VecList : ∀ {n J}
+                (Tss : Vec (List (Φ ⊢⋆ J)) n)
+                ------------------------------------------------------------------
+              → sub-VecList (sub σ ∘ σ') Tss ≡ sub-VecList σ (sub-VecList σ' Tss)
 
-subTyCon-comp integer    = refl
-subTyCon-comp bytestring = refl
-subTyCon-comp string     = refl
-subTyCon-comp unit       = refl
-subTyCon-comp bool       = refl
-subTyCon-comp (list A)   = cong list (sub-comp A)
-subTyCon-comp (pair A B) = cong₂ pair (sub-comp A) (sub-comp B)
-subTyCon-comp Data       = refl
 
-sub-comp (` x)   = refl
-sub-comp (Π A)   = cong Π (trans (sub-cong extscomp A) (sub-comp A))
-sub-comp (A ⇒ B) = cong₂ _⇒_ (sub-comp A) (sub-comp B)
-sub-comp (ƛ A)   = cong ƛ (trans (sub-cong extscomp A) (sub-comp A))
-sub-comp (A · B) = cong₂ _·_ (sub-comp A) (sub-comp B)
-sub-comp (μ A B) = cong₂ μ (sub-comp A) (sub-comp B)
-sub-comp (con c) = cong con (subTyCon-comp c) 
+sub-comp (` x)      = refl
+sub-comp (Π A)      = cong Π (trans (sub-cong extscomp A) (sub-comp A))
+sub-comp (A ⇒ B)    = cong₂ _⇒_ (sub-comp A) (sub-comp B)
+sub-comp (ƛ A)      = cong ƛ (trans (sub-cong extscomp A) (sub-comp A))
+sub-comp (A · B)    = cong₂ _·_ (sub-comp A) (sub-comp B)
+sub-comp (μ A B)    = cong₂ μ (sub-comp A) (sub-comp B)
+sub-comp (^ x)      = refl
+sub-comp (con c)    = cong con (sub-comp c)
+sub-comp (SOP xss)  = cong SOP (sub-com-VecList xss)
+
+sub-com-List [] = refl
+sub-com-List (x ∷ xs) = cong₂ _∷_ (sub-comp x) (sub-com-List xs)
+sub-com-VecList [] = refl
+sub-com-VecList (xs ∷ xss) = cong₂ _∷_ (sub-com-List xs) (sub-com-VecList xss)
 ```
 
 Commuting `sub-cons` and `ren`
@@ -507,6 +552,7 @@ sub-sub-cons : (σ : Sub Φ Ψ)
 sub-sub-cons σ M Z     = refl
 sub-sub-cons σ M (S α) = trans (sym (sub-ren (σ α))) (sub-id (σ α))
 ```
+## Additional lemmas
 
 A useful lemma for fixing up the types when renaming a `wrap` or `unwrap`
 
@@ -557,4 +603,45 @@ sub-Π : ∀(A : Φ ⊢⋆ K)(B : Φ ,⋆ K ⊢⋆ J)(σ : Sub Φ Ψ)
       → sub (exts σ) B [ sub σ A ] ≡ sub σ (B [ A ])
 sub-Π A B σ =
   trans (sym (sub-comp B)) (trans (sub-cong (sub-sub-cons σ A) B) (sub-comp B))
+```
+
+Substituting in the empty type context is the same as doing nothing.
+```
+sub-∅ : (A : ∅ ⊢⋆ J)  → (x : Sub ∅ ∅) → sub x A ≡ A
+sub-∅ A x = trans (sub-cong (λ ()) A) (sub-id A)
+```
+
+If we start from a type in an empty context, we may weaken it to any context,
+and then we have two lemmas.
+```
+sub∅ : ∀{Φ K} → ∅ ⊢⋆ K → Φ ⊢⋆ K
+sub∅ t = sub (λ()) t
+
+sub∅-ren : ∀{K} (t : ∅ ⊢⋆ K) (ρ : Ren Φ Ψ) → sub∅ t ≡ ren ρ (sub∅ t)
+sub∅-ren t ρ = trans (sub-cong (λ ()) t) (ren-sub t)
+
+sub∅-sub : ∀{K} (t : ∅ ⊢⋆ K) (ρ : Sub Φ Ψ) → sub∅ t ≡ sub ρ (sub∅ t)
+sub∅-sub t ρ = trans (sub-cong (λ ()) t) (sub-comp t)
+```
+
+Some properties relating uses of lookup on VecList-functions with List-functions
+
+```
+lookup-ren-VecList : ∀ {n}
+              → (ρ : Ren Φ Ψ)
+              → (e : Fin n)
+              → (Tss : Vec (List (Φ ⊢⋆ *)) n)
+                --------------------------------------------
+              → lookup (ren-VecList ρ Tss) e ≡ ren-List ρ (lookup Tss e)
+lookup-ren-VecList ρ zero (_ ∷ _) = refl
+lookup-ren-VecList ρ (suc e) (_ ∷ Tss) = lookup-ren-VecList ρ e Tss
+
+lookup-sub-VecList : ∀ {n}
+              → (σ : Sub Φ Ψ)
+              → (e : Fin n)
+              → (Tss : Vec (List (Φ ⊢⋆ *)) n)
+                --------------------------------------------
+              → lookup (sub-VecList σ Tss) e ≡ sub-List σ (lookup Tss e)
+lookup-sub-VecList σ zero (_ ∷ _) = refl
+lookup-sub-VecList σ (suc e) (_ ∷ Tss) = lookup-sub-VecList σ e Tss
 ```

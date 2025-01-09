@@ -6,7 +6,6 @@ module UntypedPlutusCore (
     , parseScoped
     , PLC.DefaultUni
     , PLC.DefaultFun
-    , mkDefaultProg
     ) where
 
 import UntypedPlutusCore.Check.Scope as Export
@@ -17,21 +16,20 @@ import UntypedPlutusCore.Simplify as Export
 import UntypedPlutusCore.Size as Export
 import UntypedPlutusCore.Subst as Export
 
-import PlutusCore.Core qualified as PLC
 import PlutusCore.Default qualified as PLC
-import PlutusCore.Name as Export
+import PlutusCore.Error (ApplyProgramError (MkApplyProgramError))
+import PlutusCore.Name.Unique as Export
 
--- | Take one UPLC program and apply it to another.
-applyProgram ::
-    Monoid a =>
-    Program name uni fun a ->
-    Program name uni fun a ->
-    Program name uni fun a
-applyProgram (Program a1 _ t1) (Program a2 _ t2) =
-    Program (a1 <> a2) PLC.defaultVersion (Apply (termAnn t1 <> termAnn t2) t1 t2)
+import Control.Monad.Except
 
-{- | DON'T USE, we'll be getting rid of `defaultVersion`.
-Turn a UPLC term to a UPLC program with the default version.
--}
-mkDefaultProg :: Term name uni fun () -> Program name uni fun ()
-mkDefaultProg = Program () PLC.defaultVersion
+-- | Applies one program to another. Fails if the versions do not match
+-- and tries to merge annotations.
+applyProgram
+    :: (MonadError ApplyProgramError m, Semigroup a)
+    => Program name uni fun a
+    -> Program name uni fun a
+    -> m (Program name uni fun a)
+applyProgram (Program a1 v1 t1) (Program a2 v2 t2) | v1 == v2
+  = pure $ Program (a1 <> a2) v1 (Apply (termAnn t1 <> termAnn t2) t1 t2)
+applyProgram (Program _a1 v1 _t1) (Program _a2 v2 _t2) =
+    throwError $ MkApplyProgramError v1 v2

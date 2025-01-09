@@ -1,4 +1,3 @@
--- editorconfig-checker-disable-file
 module PlutusTx (
     module Export,
     CompiledCode,
@@ -8,6 +7,7 @@ module PlutusTx (
     getPir,
     getPirNoAnn,
     applyCode,
+    unsafeApplyCode,
     BuiltinData,
     Data (..),
     ToData (..),
@@ -19,17 +19,21 @@ module PlutusTx (
     dataToBuiltinData,
     unstableMakeIsData,
     makeIsDataIndexed,
+    makeIsDataSchemaIndexed,
     Lift,
     Typeable,
     makeLift,
     safeLiftCode,
-    liftCode) where
+    liftCode,
+    liftCodeDef) where
 
 import PlutusCore.Data (Data (..))
+import PlutusTx.Blueprint.TH (makeIsDataSchemaIndexed)
 import PlutusTx.Builtins (BuiltinData, builtinDataToData, dataToBuiltinData)
-import PlutusTx.Code (CompiledCode, CompiledCodeIn, applyCode, getPir, getPirNoAnn, getPlc, getPlcNoAnn)
-import PlutusTx.IsData (FromData (..), ToData (..), UnsafeFromData (..), fromData, makeIsDataIndexed, toData,
-                        unstableMakeIsData)
-import PlutusTx.Lift (liftCode, makeLift, safeLiftCode)
+import PlutusTx.Code (CompiledCode, CompiledCodeIn, applyCode, getPir, getPirNoAnn, getPlc,
+                      getPlcNoAnn, unsafeApplyCode)
+import PlutusTx.IsData (FromData (..), ToData (..), UnsafeFromData (..), fromData,
+                        makeIsDataIndexed, toData, unstableMakeIsData)
+import PlutusTx.Lift (liftCode, liftCodeDef, makeLift, safeLiftCode)
 import PlutusTx.Lift.Class (Lift, Typeable)
 import PlutusTx.TH as Export

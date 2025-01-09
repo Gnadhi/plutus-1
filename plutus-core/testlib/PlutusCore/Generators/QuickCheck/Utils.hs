@@ -1,15 +1,19 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeFamilies      #-}
 
-module PlutusCore.Generators.QuickCheck.Utils where
+module PlutusCore.Generators.QuickCheck.Utils
+    ( module PlutusCore.Generators.QuickCheck.Utils
+    , module Export
+    ) where
 
 import PlutusCore.Default
+import PlutusCore.Generators.QuickCheck.Split as Export
 import PlutusCore.MkPlc hiding (error)
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Pretty
+import PlutusCore.Quote
 import PlutusIR
 import PlutusIR.Compiler.Datatype
-import PlutusIR.Core.Instance.Pretty.Readable
 import PlutusIR.Subst
 
 import Data.Kind qualified as GHC
@@ -21,6 +25,16 @@ import Data.String
 import Prettyprinter
 import Test.QuickCheck
 
+-- | Generate a list of the given length, all arguments of which are distinct. Takes O(n^2) time
+-- or more if the generator is likely to generate equal values.
+uniqueVectorOf :: Eq a => Int -> Gen a -> Gen [a]
+uniqueVectorOf i0 genX = go [] i0 where
+    go acc i
+        | i <= 0    = pure acc
+        | otherwise = do
+              x <- genX `suchThat` (`notElem` acc)
+              go (x : acc) (i - 1)
+
 -- | Show a `Doc` when a property fails.
 ceDoc :: Testable t => Doc ann -> t -> Property
 ceDoc d = counterexample (render d)
@@ -28,16 +42,16 @@ ceDoc d = counterexample (render d)
 -- | Bind a value to a name in a property so that
 -- it is displayed as a `name = thing` binding if the
 -- property fails.
-letCE :: (PrettyPir a, Testable p)
+letCE :: (PrettyReadable a, Testable p)
       => String
       -> a
       -> (a -> p)
       -> Property
-letCE name x k = ceDoc (fromString name <+> "=" <+> prettyPirReadable x) (k x)
+letCE name x k = ceDoc (fromString name <+> "=" <+> prettyReadable x) (k x)
 
 -- | Like `forAllShrink` but displays the bound value as
 -- a named pretty-printed binding like `letCE`
-forAllDoc :: (PrettyPir a, Testable p)
+forAllDoc :: (PrettyReadable a, Testable p)
           => String
           -> Gen a
           -> (a -> [a])
@@ -45,14 +59,14 @@ forAllDoc :: (PrettyPir a, Testable p)
           -> Property
 forAllDoc name g shr k =
   forAllShrinkBlind g shr $ \ x ->
-    ceDoc (fromString name <+> "=" <+> prettyPirReadable x)
+    ceDoc (fromString name <+> "=" <+> prettyReadable x)
           (k x)
 
 -- | Check that a list of potential counterexamples is empty and display the
 -- list as a QuickCheck counterexample if its not.
-assertNoCounterexamples :: PrettyPir a => [a] -> Property
+assertNoCounterexamples :: (PrettyReadable a) => [a] -> Property
 assertNoCounterexamples []  = property True
-assertNoCounterexamples bad = ceDoc (prettyPirReadable bad) False
+assertNoCounterexamples bad = ceDoc (prettyReadable bad) False
 
 -- * Containers (zipper-ish, very useful for shrinking).
 
@@ -104,15 +118,21 @@ freshenTyNameWith fvs (TyName (Name x j)) = TyName (Name x i) where
   i  = succ $ Set.findMax is
   is = Set.insert j $ Set.insert (toEnum 0) $ Set.mapMonotonic (_nameUnique . unTyName) fvs
 
+maxUsedUnique :: Set TyName -> Unique
+maxUsedUnique fvs = i
+  where
+    i  = Set.findMax is
+    is = Set.insert (toEnum 0) $ Set.mapMonotonic (_nameUnique . unTyName) fvs
+
 -- | Get the names and types of the constructors of a datatype.
 constrTypes :: Datatype TyName Name DefaultUni () -> [(Name, Type TyName DefaultUni ())]
 constrTypes (Datatype _ _ xs _ cs) = [ (c, mkIterTyForall xs ty) | VarDecl _ c ty <- cs ]
 
 -- | Get the name and type of the match function for a given datatype.
 matchType :: Datatype TyName Name DefaultUni () -> (Name, Type TyName DefaultUni ())
-matchType d@(Datatype _ (TyVarDecl _ a _) xs m cs) = (m, mkDestructorTy (mkScottTy () d out) d)
+matchType d@(Datatype _ (TyVarDecl _ a _) xs m cs) = (m, destrTy)
   where
     fvs = Set.fromList (a : [x | TyVarDecl _ x _ <- xs]) <>
           mconcat [setOf ftvTy ty | VarDecl _ _ ty <- cs]
-    outName = "out_" <> _nameText (unTyName a)
-    out = freshenTyNameWith fvs $ TyName $ Name outName (toEnum 0)
+    maxUsed = maxUsedUnique fvs
+    destrTy = runQuote $ markNonFresh maxUsed >> mkDestructorTy d

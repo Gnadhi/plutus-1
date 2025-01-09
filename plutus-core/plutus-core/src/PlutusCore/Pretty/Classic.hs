@@ -3,21 +3,25 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds       #-}
 {-# LANGUAGE TypeFamilies    #-}
+{-# LANGUAGE TypeOperators   #-}
 
 module PlutusCore.Pretty.Classic
     ( PrettyConfigClassic (..)
     , PrettyClassicBy
     , PrettyClassic
+    , PrettyParens
+    , juxtRenderContext
     , consAnnIf
-    , defPrettyConfigClassic
-    , debugPrettyConfigClassic
-    , prettyClassicDef
-    , prettyClassicDebug
+    , prettyConfigClassic
+    , prettyConfigClassicSimple
+    , prettyClassic
+    , prettyClassicSimple
     ) where
 
 import PlutusPrelude
 
 import PlutusCore.Pretty.ConfigName
+import PlutusCore.Pretty.Extra
 
 import Prettyprinter.Internal (Doc (Empty))
 
@@ -26,6 +30,7 @@ data PrettyConfigClassic configName = PrettyConfigClassic
     { _pccConfigName :: configName  -- ^ How to pretty-print names.
     , _pccDisplayAnn :: Bool        -- ^ Whether to display annotations.
     }
+    deriving stock (Show)
 
 type instance HasPrettyDefaults (PrettyConfigClassic _) = 'True
 
@@ -46,16 +51,16 @@ isEmptyDoc _     = False
 consAnnIf :: Pretty ann => PrettyConfigClassic configName -> ann -> [Doc dann] -> [Doc dann]
 consAnnIf config ann rest = filter (not . isEmptyDoc) [pretty ann | _pccDisplayAnn config] ++ rest
 
-defPrettyConfigClassic :: PrettyConfigClassic PrettyConfigName
-defPrettyConfigClassic = PrettyConfigClassic defPrettyConfigName False
+prettyConfigClassic :: PrettyConfigClassic PrettyConfigName
+prettyConfigClassic = PrettyConfigClassic prettyConfigName False
 
-debugPrettyConfigClassic :: PrettyConfigClassic PrettyConfigName
-debugPrettyConfigClassic = PrettyConfigClassic debugPrettyConfigName False
+prettyConfigClassicSimple :: PrettyConfigClassic PrettyConfigName
+prettyConfigClassicSimple = PrettyConfigClassic prettyConfigNameSimple False
 
 -- | Pretty-print a value in the default mode using the classic view.
-prettyClassicDef :: PrettyClassic a => a -> Doc ann
-prettyClassicDef = prettyBy defPrettyConfigClassic
+prettyClassic :: PrettyClassic a => a -> Doc ann
+prettyClassic = prettyBy prettyConfigClassic
 
--- | Pretty-print a value in the debug mode using the classic view.
-prettyClassicDebug :: PrettyClassic a => a -> Doc ann
-prettyClassicDebug = prettyBy debugPrettyConfigClassic
+-- | Pretty-print a value in the simple mode using the classic view.
+prettyClassicSimple :: PrettyClassic a => a -> Doc ann
+prettyClassicSimple = prettyBy prettyConfigClassicSimple

@@ -1,5 +1,7 @@
+{-# LANGUAGE CPP               #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies      #-}
+{-# LANGUAGE TypeOperators     #-}
 module Data.RandomAccessList.Class
     ( RandomAccessList (..)
     , Data.RandomAccessList.Class.head
@@ -9,7 +11,12 @@ module Data.RandomAccessList.Class
 
 import Data.Kind
 import Data.List qualified as List
+#if MIN_VERSION_base(4,19,0)
+-- Avoid a compiler warning about unused package `extra`.
+import Data.List.Extra ()
+#else
 import Data.List.Extra qualified as List
+#endif
 import Data.Maybe (fromJust, fromMaybe)
 import Data.RAList qualified as RAL
 import Data.Vector.NonEmpty qualified as NEV
@@ -64,15 +71,15 @@ class RandomAccessList e where
     unsafeIndexOne :: e -> Word64 -> Element e
     unsafeIndexOne e = fromJust . indexOne e
 
-{-# INLINABLE head #-}
 -- O(1) worst-case
 head :: (RandomAccessList e, a ~ Element e) => e -> a
 head = fst . fromMaybe (error "empty list") . uncons
+{-# INLINABLE head #-}
 
-{-# INLINABLE tail #-}
 -- O(1) worst-case
 tail :: (RandomAccessList e) => e -> e
 tail = snd . fromMaybe (error "empty list") . uncons
+{-# INLINABLE tail #-}
 
 instance RandomAccessList [a] where
     type Element [a] = a

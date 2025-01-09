@@ -1,4 +1,3 @@
--- editorconfig-checker-disable-file
 {- | Tests for the Plutus nofib benchmarks, mostly comparing the result of Plutus
 evaluation with the result of Haskell evaluation. Lastpiece is currently omitted
 because its memory consumption as a Plutus program is too great to allow it to
@@ -9,7 +8,7 @@ run to completion. -}
 module Main where
 
 import Test.Tasty
-import Test.Tasty.Extras (TestNested, runTestNestedIn)
+import Test.Tasty.Extras (TestNested, runTestNested, testNestedGhc)
 import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck
 
@@ -25,14 +24,15 @@ import PlutusCore.Default
 import PlutusTx qualified as Tx
 import PlutusTx.Test qualified as Tx
 
-runTestNested :: TestNested -> TestTree
-runTestNested = runTestNestedIn ["nofib", "test"]
-
+-- Make a set of golden tests with results stored in subdirectories determined
+-- by the GHC version.
+runTestGhc :: [TestNested] -> TestTree
+runTestGhc = runTestNested ["nofib", "test"] . pure . testNestedGhc
 
 -- Unit tests comparing PLC and Haskell computations on given inputs
 
 runAndCheck :: Tx.Lift DefaultUni a => Term -> a -> IO ()
-runAndCheck term value = cekResultMatchesHaskellValue term (@?=) value
+runAndCheck term = cekResultMatchesHaskellValue term (@?=)
 
 ---------------- Clausify ----------------
 
@@ -47,9 +47,14 @@ testClausify = testGroup "clausify"
                , testCase "formula3" $ mkClausifyTest Clausify.F3
                , testCase "formula4" $ mkClausifyTest Clausify.F4
                , testCase "formula5" $ mkClausifyTest Clausify.F5
-               , Tx.fitsInto "formula1 (size)" (Clausify.mkClausifyCode Clausify.F1) 4901
-               , runTestNested $ Tx.goldenBudget "formulaBudget" $ Clausify.mkClausifyCode Clausify.F1
+               , runTestGhc
+                     [ Tx.goldenPirReadable "clausify-F5" formula5example
+                     , Tx.goldenSize "clausify-F5" formula5example
+                     , Tx.goldenBudget "clausify-F5" formula5example
+                     , Tx.goldenEvalCekCatch "clausify-F5" [formula5example]
+                     ]
                ]
+    where formula5example = Clausify.mkClausifyCode Clausify.F5
 
 ---------------- Knights ----------------
 
@@ -65,9 +70,14 @@ testKnights = testGroup "knights"  -- Odd sizes call "error" because there are n
               , testCase "depth 100, 4x4" $ mkKnightsTest 100 4
               , testCase "depth 100, 6x6" $ mkKnightsTest 100 6
               , testCase "depth 100, 8x8" $ mkKnightsTest 100 8
-              , Tx.fitsInto "depth 10, 4x4 (size)" (Knights.mkKnightsCode 10 4) 3463
-              , runTestNested $ Tx.goldenBudget "knightsBudget" $ Knights.mkKnightsCode 10 4
+              , runTestGhc
+                    [ Tx.goldenPirReadable "knights10-4x4" knightsExample
+                    , Tx.goldenSize "knights10-4x4" knightsExample
+                    , Tx.goldenBudget "knights10-4x4" knightsExample
+                    , Tx.goldenEvalCekCatch "knights10-4x4" [knightsExample]
+                    ]
               ]
+    where knightsExample = Knights.mkKnightsCode 10 4
 
 ---------------- Queens ----------------
 
@@ -83,7 +93,12 @@ testQueens = testGroup "queens"
                , testCase "Bjbt1" $ mkQueensTest 4 Queens.Bjbt1
                , testCase "Bjbt2" $ mkQueensTest 4 Queens.Bjbt2
                , testCase "Fc"    $ mkQueensTest 4 Queens.Fc
-               , runTestNested    $ Tx.goldenBudget "queens4budget" $ Queens.mkQueensCode 4 Queens.Bt
+               , runTestGhc
+                     [ Tx.goldenPirReadable "queens4-bt" queens4btExample
+                     , Tx.goldenSize "queens4-bt" queens4btExample
+                     , Tx.goldenBudget "queens4-bt" queens4btExample
+                     , Tx.goldenEvalCekCatch "queens4-bt" [queens4btExample]
+                     ]
                ]
              , testGroup "5x5"
                [ testCase "Bt"    $ mkQueensTest 5 Queens.Bt
@@ -91,10 +106,16 @@ testQueens = testGroup "queens"
                , testCase "Bjbt1" $ mkQueensTest 5 Queens.Bjbt1
                , testCase "Bjbt2" $ mkQueensTest 5 Queens.Bjbt2
                , testCase "Fc"    $ mkQueensTest 5 Queens.Fc
-               , runTestNested    $ Tx.goldenBudget "queens5budget" $ Queens.mkQueensCode 5 Queens.Bt
+               , runTestGhc
+                     [ Tx.goldenPirReadable "queens5-fc" queens5fcExample
+                     , Tx.goldenSize "queens5-fc" queens5fcExample
+                     , Tx.goldenBudget "queens5-fc" queens5fcExample
+                     , Tx.goldenEvalCekCatch "queens5-fc" [queens5fcExample]
+                     ]
                ]
-             , Tx.fitsInto "Bt (size)" (Queens.mkQueensCode 5 Queens.Bt) 2707
              ]
+    where queens4btExample = Queens.mkQueensCode 4 Queens.Bt
+          queens5fcExample = Queens.mkQueensCode 5 Queens.Fc
 
 ---------------- Primes ----------------
 
@@ -132,7 +153,8 @@ sixDigits = choose (100000, 999999)
 
 prop_primalityTest :: Integer -> Property
 prop_primalityTest n =
-    n >= 2 ==> cekResultMatchesHaskellValue (Prime.mkPrimalityTestTerm n) (===) (Prime.runPrimalityTest n)
+    n >= 2 ==>
+      cekResultMatchesHaskellValue (Prime.mkPrimalityTestTerm n) (===) (Prime.runPrimalityTest n)
 
 testPrimalityQC :: TestTree
 testPrimalityQC = testProperty "primality test (QuickCheck)" (forAll sixDigits prop_primalityTest)

@@ -15,6 +15,9 @@
 *.gls
 *.glsdefs
 *.ist
+*.ilg
+*.nlo
+*.nls
 *.out
 *.toc
 *.bcf
@@ -32,6 +35,7 @@ cabal-dev
 cabal.sandbox.config
 cabal.config
 cabal.project.local
+cabal.project.freeze
 
 # Stack
 .stack-work
@@ -53,6 +57,9 @@ stack.yaml.lock
 # Python
 __pycache__
 
+# NodeJS (used by scripts/blueprints/check-json-schemas.js as it depends on the AJV nodejs lib)
+node_modules
+
 # Nix
 result*
 pkgs/.cabal
@@ -68,25 +75,8 @@ pkgs/.stack
 *.code-workspace
 .*.sw*
 
-# Frontend generated files (NPM/Yarn, Spago, generated PS, etc.)
-# N.B. officially we use NPM; ignoring Yarn files allows the local use of Yarn for those that want
-**/generated
-**/generated/
-**/generated-docs/
-**/node_modules/
-**/output/
-**/yarn-error.log
-**/yarn.lock
-**/.psci_modules/
-**/.psc-package/
-**/.psc-package2nix/
-**/.spago/
-**/.spago2nix/
-
-# Backend config files
-marlowe-playground-server/playground.yaml
-plutus-playground-server/playground.yaml
-plutus-pab/plutus-pab.yaml
+# Doc site
+yarn.lock
 
 # Misc
 act-event.json
@@ -113,8 +103,12 @@ node.sock
 .pre-commit-config.yaml
 secrets/*/.gpg-id
 ghcid.txt
+haddock*
+.private
+linkchecker-out.txt
 plutus-pab/test-node/testnet/db
 plutus-pab/test-node/alonzo-purple/db
+*.actual.json
 # profiling output files
 *.timelog
 *.stacks

@@ -20,7 +20,7 @@ module PlutusCore.Generators.Hedgehog.Denotation
 import PlutusCore.Builtin
 import PlutusCore.Core
 import PlutusCore.Default
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusPrelude
 
 import Data.Dependent.Map (DMap)
@@ -28,7 +28,7 @@ import Data.Dependent.Map qualified as DMap
 import Data.Functor.Compose
 import Type.Reflection
 
-type KnownType val a = (KnownTypeAst (UniOf val) a, MakeKnown val a)
+type KnownType val a = (KnownTypeAst TyName (UniOf val) a, MakeKnown val a)
 
 -- | Haskell denotation of a PLC object. An object can be a 'Builtin' or a variable for example.
 data Denotation term object res = forall args. Denotation
@@ -116,6 +116,9 @@ insertBuiltin fun =
                 insertDenotation tr $ Denotation fun (Builtin ()) meta sch
 
 -- | A 'DenotationContext' that consists of 'DefaultFun's.
+--
+-- DEPRECATED: No need to update for a new builtin.
+-- Outdated, since we moved to quickcheck generators.
 typedBuiltins
     :: DenotationContext (Term TyName Name DefaultUni DefaultFun ())
 typedBuiltins
@@ -137,5 +140,9 @@ typedBuiltins
     . insertBuiltin AppendByteString
     . insertBuiltin Sha2_256
     . insertBuiltin Sha3_256
+    . insertBuiltin Blake2b_224
+    . insertBuiltin Blake2b_256
+    . insertBuiltin Keccak_256
+    . insertBuiltin Ripemd_160
     . insertBuiltin EqualsByteString
     $ DenotationContext mempty

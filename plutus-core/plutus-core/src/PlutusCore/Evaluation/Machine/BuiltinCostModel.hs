@@ -14,14 +14,26 @@ module PlutusCore.Evaluation.Machine.BuiltinCostModel
     ( BuiltinCostModel
     , BuiltinCostModelBase(..)
     , CostingFun(..)
-    , ModelAddedSizes(..)
+    , UnimplementedCostingFun(..)
+    , Intercept(..)
+    , Slope(..)
+    , Coefficient0(..)
+    , Coefficient1(..)
+    , Coefficient2(..)
+    , Coefficient00(..)
+    , Coefficient10(..)
+    , Coefficient01(..)
+    , Coefficient20(..)
+    , Coefficient11(..)
+    , Coefficient02(..)
+    , OneVariableLinearFunction(..)
+    , OneVariableQuadraticFunction(..)
+    , TwoVariableLinearFunction(..)
+    , TwoVariableQuadraticFunction(..)
     , ModelSubtractedSizes(..)
-    , ModelConstantOrLinear(..)
+    , ModelConstantOrOneArgument(..)
     , ModelConstantOrTwoArguments(..)
-    , ModelLinearSize(..)
-    , ModelMultipliedSizes(..)
-    , ModelMinSize(..)
-    , ModelMaxSize(..)
+    , ModelConstantOrLinear(..)  -- Deprecated: see Note [Backward compatibility for costing functions]
     , ModelOneArgument(..)
     , ModelTwoArguments(..)
     , ModelThreeArguments(..)
@@ -133,13 +145,51 @@ data BuiltinCostModelBase f =
     , paramMkNilData                       :: f ModelOneArgument
     , paramMkNilPairData                   :: f ModelOneArgument
     , paramSerialiseData                   :: f ModelOneArgument
+    -- BLS12-381
+    , paramBls12_381_G1_add                :: f ModelTwoArguments
+    , paramBls12_381_G1_neg                :: f ModelOneArgument
+    , paramBls12_381_G1_scalarMul          :: f ModelTwoArguments
+    , paramBls12_381_G1_equal              :: f ModelTwoArguments
+    , paramBls12_381_G1_compress           :: f ModelOneArgument
+    , paramBls12_381_G1_uncompress         :: f ModelOneArgument
+    , paramBls12_381_G1_hashToGroup        :: f ModelTwoArguments
+    , paramBls12_381_G2_add                :: f ModelTwoArguments
+    , paramBls12_381_G2_neg                :: f ModelOneArgument
+    , paramBls12_381_G2_scalarMul          :: f ModelTwoArguments
+    , paramBls12_381_G2_equal              :: f ModelTwoArguments
+    , paramBls12_381_G2_compress           :: f ModelOneArgument
+    , paramBls12_381_G2_uncompress         :: f ModelOneArgument
+    , paramBls12_381_G2_hashToGroup        :: f ModelTwoArguments
+    , paramBls12_381_millerLoop            :: f ModelTwoArguments
+    , paramBls12_381_mulMlResult           :: f ModelTwoArguments
+    , paramBls12_381_finalVerify           :: f ModelTwoArguments
+    -- Keccak_256, Blake2b_224
+    , paramKeccak_256                      :: f ModelOneArgument
+    , paramBlake2b_224                     :: f ModelOneArgument
+    -- Bitwise operations
+    , paramIntegerToByteString             :: f ModelThreeArguments
+    , paramByteStringToInteger             :: f ModelTwoArguments
+    , paramAndByteString                   :: f ModelThreeArguments
+    , paramOrByteString                    :: f ModelThreeArguments
+    , paramXorByteString                   :: f ModelThreeArguments
+    , paramComplementByteString            :: f ModelOneArgument
+    , paramReadBit                         :: f ModelTwoArguments
+    , paramWriteBits                       :: f ModelThreeArguments
+    , paramReplicateByte                   :: f ModelTwoArguments
+    , paramShiftByteString                 :: f ModelTwoArguments
+    , paramRotateByteString                :: f ModelTwoArguments
+    , paramCountSetBits                    :: f ModelOneArgument
+    , paramFindFirstSetBit                 :: f ModelOneArgument
+    -- Ripemd_160
+    , paramRipemd_160                      :: f ModelOneArgument
+    , paramExpModInteger                   :: f ModelThreeArguments
     }
     deriving stock (Generic)
     deriving anyclass (FunctorB, TraversableB, ConstraintsB)
 
-deriving via CustomJSON '[FieldLabelModifier (StripPrefix "param", LowerIntialCharacter)]
+deriving via CustomJSON '[FieldLabelModifier (StripPrefix "param", LowerInitialCharacter)]
              (BuiltinCostModelBase CostingFun) instance ToJSON (BuiltinCostModelBase CostingFun)
-deriving via CustomJSON '[FieldLabelModifier (StripPrefix "param", LowerIntialCharacter)]
+deriving via CustomJSON '[FieldLabelModifier (StripPrefix "param", LowerInitialCharacter)]
              (BuiltinCostModelBase CostingFun) instance FromJSON (BuiltinCostModelBase CostingFun)
 
 -- | Same as 'CostingFun' but maybe missing.
@@ -149,7 +199,7 @@ newtype MCostingFun a = MCostingFun (Maybe (CostingFun a))
     deriving (Semigroup, Monoid) via (Alt Maybe (CostingFun a)) -- for mempty == MCostingFun Nothing
 
 -- Omit generating JSON for any costing functions that have not been set (are missing).
-deriving via CustomJSON '[OmitNothingFields, FieldLabelModifier (StripPrefix "param", LowerIntialCharacter)]
+deriving via CustomJSON '[OmitNothingFields, FieldLabelModifier (StripPrefix "param", LowerInitialCharacter)]
              (BuiltinCostModelBase MCostingFun) instance ToJSON (BuiltinCostModelBase MCostingFun)
 
 -- Needed to help derive various instances for BuiltinCostModelBase
