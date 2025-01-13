@@ -7,6 +7,7 @@
 module PlutusTx.Show (
     Show (..),
     ShowS,
+    toDigits,
     showString,
     showSpace,
     showCommaSpace,
@@ -24,6 +25,7 @@ import PlutusTx.List (foldr)
 import PlutusTx.Maybe
 import PlutusTx.Prelude hiding (foldr)
 import PlutusTx.Show.TH
+import PlutusTx.These
 
 instance Show Builtins.Integer where
     {-# INLINEABLE showsPrec #-}
@@ -50,7 +52,6 @@ instance Show Builtins.Integer where
                 )
                 . acc
 
-{-# INLINEABLE toDigits #-}
 -- | Convert a non-negative integer to individual digits.
 toDigits :: Builtins.Integer -> [Builtins.Integer]
 toDigits = go []
@@ -60,6 +61,7 @@ toDigits = go []
             if q == 0
                 then r : acc
                 else go (r : acc) q
+{-# INLINEABLE toDigits #-}
 
 instance Show Builtins.BuiltinByteString where
     {-# INLINEABLE showsPrec #-}
@@ -108,7 +110,7 @@ instance Show () where
 
 -- It is possible to make it so that when `a` is a builtin type, `show (xs :: [a])`
 -- is compiled into a single `showConstant` call, rathern than `length xs` calls.
--- To do so the plugin would need to try to solve the @uni `Contains` [a]@ constraint,
+-- To do so the plugin would need to try to solve the @uni `HasTermLevel` [a]@ constraint,
 -- and branch based on whether it is solvable. But the complexity doesn't seem to
 -- be worth it: the saving in budget is likely small, and on mainnet the trace messages
 -- are often erased anyway.
@@ -118,7 +120,6 @@ instance Show a => Show [a] where
     {-# INLINEABLE showsPrec #-}
     showsPrec _ = showList (showsPrec 0)
 
-{-# INLINEABLE showList #-}
 showList :: forall a. (a -> ShowS) -> [a] -> ShowS
 showList showElem = \case
     [] -> showString "[]"
@@ -130,6 +131,7 @@ showList showElem = \case
       where
         alg :: a -> ShowS -> ShowS
         alg a acc = showString "," . showElem a . acc
+{-# INLINEABLE showList #-}
 
 deriveShow ''(,)
 deriveShow ''(,,)
@@ -159,3 +161,4 @@ deriveShow ''(,,,,,,,,,,,,,,,,,,,,,,,,,)
 deriveShow ''(,,,,,,,,,,,,,,,,,,,,,,,,,,)
 deriveShow ''Maybe
 deriveShow ''Either
+deriveShow ''These

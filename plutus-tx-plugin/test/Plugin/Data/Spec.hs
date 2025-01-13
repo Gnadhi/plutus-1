@@ -1,6 +1,7 @@
 -- editorconfig-checker-disable-file
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE NegativeLiterals    #-}
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
@@ -10,6 +11,7 @@
 {-# OPTIONS_GHC -fplugin-opt PlutusTx.Plugin:defer-errors #-}
 {-# OPTIONS_GHC -fplugin-opt PlutusTx.Plugin:max-simplifier-iterations-pir=0 #-}
 {-# OPTIONS_GHC -fplugin-opt PlutusTx.Plugin:max-simplifier-iterations-uplc=0 #-}
+{-# OPTIONS_GHC -fplugin-opt PlutusTx.Plugin:max-cse-iterations=0 #-}
 {-# OPTIONS_GHC -fplugin-opt PlutusTx.Plugin:context-level=0 #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -28,8 +30,8 @@ import PlutusTx.Test
 import Data.Proxy
 
 datat :: TestNested
-datat = testNested "Data" [
-    monoData
+datat = testNested "Data" . pure . testNestedGhc $
+  [ monoData
   , polyData
   , newtypes
   , recursiveTypes
@@ -38,24 +40,24 @@ datat = testNested "Data" [
 
 monoData :: TestNested
 monoData = testNested "monomorphic" [
-    goldenPir "enum" basicEnum
-  , goldenPir "monoDataType" monoDataType
-  , goldenPir "monoConstructor" monoConstructor
-  , goldenPir "monoConstructed" monoConstructed
-  , goldenPir "monoCase" monoCase
-  , goldenPir "monoCaseStrict" monoCaseStrict
+    goldenPirReadable "enum" basicEnum
+  , goldenPirReadable "monoDataType" monoDataType
+  , goldenPirReadable "monoConstructor" monoConstructor
+  , goldenPirReadable "monoConstructed" monoConstructed
+  , goldenPirReadable "monoCase" monoCase
+  , goldenPirReadable "monoCaseStrict" monoCaseStrict
   , goldenUEval "monoConstDest" [ toUPlc monoCase, toUPlc monoConstructed ]
-  , goldenPir "defaultCase" defaultCase
-  , goldenPir "irrefutableMatch" irrefutableMatch
-  , goldenPir "atPattern" atPattern
+  , goldenPirReadable "defaultCase" defaultCase
+  , goldenPirReadable "irrefutableMatch" irrefutableMatch
+  , goldenPirReadable "atPattern" atPattern
   , goldenUEval "monoConstDestDefault" [ toUPlc monoCase, toUPlc monoConstructed ]
-  , goldenPir "monoRecord" monoRecord
-  , goldenPir "recordNewtype" recordNewtype
-  , goldenPir "recordWithStrictField" recordWithStrictField
-  , goldenPir "unusedWrapper" unusedWrapper
-  , goldenPir "nonValueCase" nonValueCase
-  , goldenPir "strictDataMatch" strictDataMatch
-  , goldenPir "synonym" synonym
+  , goldenPirReadable "monoRecord" monoRecord
+  , goldenPirReadable "recordNewtype" recordNewtype
+  , goldenPirReadable "recordWithStrictField" recordWithStrictField
+  , goldenPirReadable "unusedWrapper" unusedWrapper
+  , goldenPirReadable "nonValueCase" nonValueCase
+  , goldenPirReadable "strictDataMatch" strictDataMatch
+  , goldenPirReadable "synonym" synonym
   ]
 
 data MyEnum = Enum1 | Enum2
@@ -168,9 +170,9 @@ synonym = plc (Proxy @"synonym") (1::Synonym)
 
 polyData :: TestNested
 polyData = testNested "polymorphic" [
-    goldenPir "polyDataType" polyDataType
-  , goldenPir "polyConstructed" polyConstructed
-  , goldenPir "defaultCasePoly" defaultCasePoly
+    goldenPirReadable "polyDataType" polyDataType
+  , goldenPirReadable "polyConstructed" polyConstructed
+  , goldenPirReadable "defaultCasePoly" defaultCasePoly
   ]
 
 data MyPolyData a b = Poly1 a b | Poly2 a
@@ -193,14 +195,14 @@ defaultCasePoly = plc (Proxy @"defaultCasePoly") (\(x :: MyPolyData Integer Inte
 
 newtypes :: TestNested
 newtypes = testNested "newtypes" [
-    goldenPir "basicNewtype" basicNewtype
-   , goldenPir "newtypeMatch" newtypeMatch
-   , goldenPir "newtypeCreate" newtypeCreate
-   , goldenPir "newtypeId" newtypeId
-   , goldenPir "newtypeCreate2" newtypeCreate2
-   , goldenPir "nestedNewtypeMatch" nestedNewtypeMatch
+    goldenPirReadable "basicNewtype" basicNewtype
+   , goldenPirReadable "newtypeMatch" newtypeMatch
+   , goldenPirReadable "newtypeCreate" newtypeCreate
+   , goldenPirReadable "newtypeId" newtypeId
+   , goldenPirReadable "newtypeCreate2" newtypeCreate2
+   , goldenPirReadable "nestedNewtypeMatch" nestedNewtypeMatch
    , goldenUEval "newtypeCreatDest" [ toUPlc $ newtypeMatch, toUPlc $ newtypeCreate2 ]
-   , goldenPir "paramNewtype" paramNewtype
+   , goldenPirReadable "paramNewtype" paramNewtype
    ]
 
 newtype MyNewtype = MyNewtype Integer
@@ -234,19 +236,21 @@ paramNewtype = plc (Proxy @"paramNewtype") (\(x ::ParamNewtype Integer) -> case 
 
 recursiveTypes :: TestNested
 recursiveTypes = testNested "recursive" [
-    goldenPir "listConstruct" listConstruct
-    , goldenPir "listConstruct2" listConstruct2
-    , goldenPir "listConstruct3" listConstruct3
-    , goldenPir "listMatch" listMatch
+    goldenPirReadable "listConstruct" listConstruct
+    , goldenPirReadable "listConstruct2" listConstruct2
+    , goldenPirReadable "listConstruct3" listConstruct3
+    , goldenPirReadable "listMatch" listMatch
     , goldenUEval "listConstDest" [ toUPlc listMatch, toUPlc listConstruct ]
     , goldenUEval "listConstDest2" [ toUPlc listMatch, toUPlc listConstruct2 ]
-    , goldenPir "ptreeConstruct" ptreeConstruct
-    , goldenPir "ptreeMatch" ptreeMatch
+    , goldenPirReadable "ptreeConstruct" ptreeConstruct
+    , goldenPirReadable "ptreeMatch" ptreeMatch
     , goldenUEval "ptreeConstDest" [ toUPlc ptreeMatch, toUPlc ptreeConstruct ]
     , goldenUEval "polyRecEval" [ toUPlc polyRec, toUPlc ptreeConstruct ]
     , goldenUEval "ptreeFirstEval" [ toUPlc ptreeFirst, toUPlc ptreeConstruct ]
     , goldenUEval "sameEmptyRoseEval" [ toUPlc sameEmptyRose, toUPlc emptyRoseConstruct ]
     , goldenUPlc "sameEmptyRose" sameEmptyRose
+    , goldenTPlcReadable "interListConstruct" interListConstruct
+    , goldenUEval "processInterListEval" [ toUPlc processInterList, toUPlc interListConstruct ]
   ]
 
 listConstruct :: CompiledCode [Integer]
@@ -265,6 +269,16 @@ listConstruct3 = plc (Proxy @"listConstruct3") ((1::Integer):(2::Integer):(3::In
 listMatch :: CompiledCode ([Integer] -> Integer)
 listMatch = plc (Proxy @"listMatch") (\(l::[Integer]) -> case l of { (x:_) -> x ; [] -> 0; })
 
+{- Note [Non-regular data types in tests]
+A non-regular data type, a.k.a. a nested data type is, quoting "Nested Datatypes" by Richard Bird
+and Lambert Meertens, a parametrised data type whose declaration involves different instances of the
+accompanying type parameters. Such data types cannot be encoded with regular @fix :: (* -> *) -> *@
+and require our fancy @ifix@ business, hence they make for good tests, which is how we have so many
+of them.
+-}
+
+-- See Note [Non-regular data types in tests].
+-- | A type of perfectly balanced binary trees.
 data B a = One a | Two (B (a, a))
 
 ptreeConstruct :: CompiledCode (B Integer)
@@ -290,6 +304,8 @@ ptreeFirst = plc (Proxy @"ptreeFirst") (
         go k (Two b) = go (\(x, _) -> k x) b
     in go (\x -> x))
 
+-- See Note [Non-regular data types in tests].
+-- | A type of rose trees with empty leaves.
 data EmptyRose = EmptyRose [EmptyRose]
 
 emptyRoseConstruct :: CompiledCode EmptyRose
@@ -309,14 +325,36 @@ sameEmptyRose = plc (Proxy @"sameEmptyRose") (
         go = EmptyRose |. (map go .| unEmptyRose)
     in go)
 
+-- See Note [Non-regular data types in tests].
+-- | A type of lists containing two values at each node, with the types of those values getting
+-- swapped each time we move from one node to the next one.
+data InterList a b
+    = InterNil
+    | InterCons a b (InterList b a)  -- Note that the parameters get swapped.
+
+interListConstruct :: CompiledCode (InterList Integer Bool)
+interListConstruct =
+    plc
+        (Proxy @"interListConstruct")
+        (InterCons 0 False (InterCons False (-1) (InterCons 42 True InterNil)))
+
+processInterList :: CompiledCode (InterList Integer Bool -> Integer)
+processInterList = plc (Proxy @"foldrInterList") (
+    let foldrInterList :: forall a b r. (a -> b -> r -> r) -> r -> InterList a b -> r
+        foldrInterList f0 z = go f0 where
+          go :: forall a b. (a -> b -> r -> r) -> InterList a b -> r
+          go _  InterNil          = z
+          go f (InterCons x y xs) = f x y (go (flip f) xs)
+    in foldrInterList (\x b r -> if b then x else r) 0)
+
 typeFamilies :: TestNested
 typeFamilies = testNested "families" [
-    goldenPir "basicClosed" basicClosed
-    , goldenPir "basicOpen" basicOpen
-    , goldenPir "associated" associated
-    , goldenPir "associatedParam" associatedParam
-    , goldenPir "basicData" basicData
-    , goldenUPlcCatch "irreducible" irreducible
+    goldenPirReadable "basicClosed" basicClosed
+    , goldenPirReadable "basicOpen" basicOpen
+    , goldenPirReadable "associated" associated
+    , goldenPirReadable "associatedParam" associatedParam
+    , goldenPirReadable "basicData" basicData
+    , goldenUPlc "irreducible" irreducible
   ]
 
 type family BasicClosed a where
@@ -346,18 +384,18 @@ associated :: CompiledCode (AType Bool -> AType Bool)
 associated = plc (Proxy @"associated") (\(x :: AType Bool) -> x)
 
 -- Despite the type family being applied to a parameterized type we can still reduce it
-{-# NOINLINE paramId #-}
 paramId :: forall a . Param a -> AType (Param a) -> AType (Param a)
 paramId _ x = x
+{-# OPAQUE paramId #-}
 
 associatedParam :: CompiledCode Integer
 associatedParam = plc (Proxy @"associatedParam") (paramId (Param 1) 1)
 
 -- Here we cannot reduce the type family
-{-# NOINLINE tfId #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 tfId :: forall a . a -> BasicClosed a -> BasicClosed a
 tfId _ x = x
+{-# OPAQUE tfId #-}
 
 irreducible :: CompiledCode Integer
 irreducible = plc (Proxy @"irreducible") (tfId True 1)

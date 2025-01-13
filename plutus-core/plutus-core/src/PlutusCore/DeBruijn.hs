@@ -1,4 +1,3 @@
--- editorconfig-checker-disable-file
 {-# LANGUAGE DerivingStrategies    #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE LambdaCase            #-}
@@ -7,10 +6,14 @@
 -- | Support for using de Bruijn indices for term and type names.
 module PlutusCore.DeBruijn
     ( Index (..)
+    , Level (..)
+    , LevelInfo (..)
     , HasIndex (..)
     , DeBruijn (..)
     , NamedDeBruijn (..)
-    , FakeNamedDeBruijn (..)
+    -- we follow the same approach as Renamed, expose the constructor from Internal module,
+    -- but hide it in this parent module.
+    , FakeNamedDeBruijn (unFakeNamedDeBruijn)
     , TyDeBruijn (..)
     , NamedTyDeBruijn (..)
     , FreeVariableError (..)
@@ -18,6 +21,7 @@ module PlutusCore.DeBruijn
     , unNameDeBruijn
     , unNameTyDeBruijn
     , fakeNameDeBruijn
+    , fakeTyNameDeBruijn
     , deBruijnTy
     , deBruijnTerm
     , unDeBruijnTy
@@ -29,20 +33,21 @@ module PlutusCore.DeBruijn
     , unDeBruijnTermWith
     , freeIndexAsConsistentLevel
     , deBruijnInitIndex
-    , fromFake, toFake
+    , fromFake
+    , toFake
     ) where
 
 import PlutusCore.DeBruijn.Internal
 
 import PlutusCore.Core.Type
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Quote
 
 import Control.Lens hiding (Index, Level, index)
 import Control.Monad.Except
 import Control.Monad.Reader
 
-{- NOTE: [DeBruijn indices of Binders]
+{- Note [DeBruijn indices of Binders]
 In a debruijnijfied Term AST, the Binders have a debruijn index
 at their the specific AST location.
 During *undebruijnification* we ignore such binders' indices because they are meaningless,
@@ -53,7 +58,7 @@ a fixed debruijn index '0' at their introduction.
 -- | Takes a "handler" function to execute when encountering free variables.
 unDeBruijnTyWith
     :: MonadQuote m
-    => (Index -> ReaderT Levels m Unique)
+    => (Index -> ReaderT LevelInfo m Unique)
     -> Type NamedTyDeBruijn uni ann
     -> m (Type TyName uni ann)
 unDeBruijnTyWith = (runDeBruijnT .) . unDeBruijnTyWithM
@@ -61,7 +66,7 @@ unDeBruijnTyWith = (runDeBruijnT .) . unDeBruijnTyWithM
 -- | Takes a "handler" function to execute when encountering free variables.
 unDeBruijnTermWith
     :: MonadQuote m
-    => (Index -> ReaderT Levels m Unique)
+    => (Index -> ReaderT LevelInfo m Unique)
     -> Term NamedTyDeBruijn NamedDeBruijn uni fun ann
     -> m (Term TyName Name uni fun ann)
 unDeBruijnTermWith = (runDeBruijnT .) . unDeBruijnTermWithM
@@ -73,8 +78,8 @@ unDeBruijnTy
     => Type NamedTyDeBruijn uni ann -> m (Type TyName uni ann)
 unDeBruijnTy = unDeBruijnTyWith freeIndexThrow
 
--- | Convert a 'Term' with 'NamedTyDeBruijn's and 'NamedDeBruijn's into a 'Term' with 'TyName's and 'Name's.
--- Will throw an error if a free variable is encountered.
+-- | Convert a 'Term' with 'NamedTyDeBruijn's and 'NamedDeBruijn's into a 'Term' with 'TyName's and
+--  'Name's. Will throw an error if a free variable is encountered.
 unDeBruijnTerm
     :: (MonadQuote m, AsFreeVariableError e, MonadError e m)
     => Term NamedTyDeBruijn NamedDeBruijn uni fun ann -> m (Term TyName Name uni fun ann)
@@ -87,8 +92,8 @@ deBruijnTy
     => Type TyName uni ann -> m (Type NamedTyDeBruijn uni ann)
 deBruijnTy = deBruijnTyWith freeUniqueThrow
 
--- | Convert a 'Term' with 'TyName's and 'Name's into a 'Term' with 'NamedTyDeBruijn's and 'NamedDeBruijn's.
--- Will throw an error if a free variable is encountered.
+-- | Convert a 'Term' with 'TyName's and 'Name's into a 'Term' with 'NamedTyDeBruijn's and
+-- 'NamedDeBruijn's. Will throw an error if a free variable is encountered.
 deBruijnTerm
     :: (AsFreeVariableError e, MonadError e m)
     => Term TyName Name uni fun ann -> m (Term NamedTyDeBruijn NamedDeBruijn uni fun ann)
@@ -96,14 +101,14 @@ deBruijnTerm = deBruijnTermWith freeUniqueThrow
 
 deBruijnTermWith
     :: Monad m
-    => (Unique -> ReaderT Levels m Index)
+    => (Unique -> ReaderT LevelInfo m Index)
     -> Term TyName Name uni fun ann
     -> m (Term NamedTyDeBruijn NamedDeBruijn uni fun ann)
 deBruijnTermWith = (runDeBruijnT .) . deBruijnTermWithM
 
 deBruijnTyWith
     :: Monad m
-    => (Unique -> ReaderT Levels m Index)
+    => (Unique -> ReaderT LevelInfo m Index)
     -> Type TyName uni ann
     -> m (Type NamedTyDeBruijn uni ann)
 deBruijnTyWith = (runDeBruijnT .) . deBruijnTyWithM
@@ -115,7 +120,7 @@ These are normally constant in a catamorphic application.
 -}
 
 deBruijnTyWithM
-    :: forall m uni ann. MonadReader Levels m
+    :: forall m uni ann. MonadReader LevelInfo m
     => (Unique -> m Index)
     -> Type TyName uni ann
     -> m (Type NamedTyDeBruijn uni ann)
@@ -136,11 +141,12 @@ deBruijnTyWithM h = go
         TyFun ann i o -> TyFun ann <$> go i <*> go o
         TyApp ann fun arg -> TyApp ann <$> go fun <*> go arg
         TyIFix ann pat arg -> TyIFix ann <$> go pat <*> go arg
+        TySOP ann tyls -> TySOP ann <$> (traverse . traverse) go tyls
         -- boring non-recursive cases
-        TyBuiltin ann con -> pure $ TyBuiltin ann con
+        TyBuiltin ann someUni -> pure $ TyBuiltin ann someUni
 
 deBruijnTermWithM
-    :: forall m uni fun ann. (MonadReader Levels m)
+    :: forall m uni fun ann. (MonadReader LevelInfo m)
     => (Unique -> m Index)
     -> Term TyName Name uni fun ann
     -> m (Term NamedTyDeBruijn NamedDeBruijn uni fun ann)
@@ -166,13 +172,15 @@ deBruijnTermWithM h = go
         Unwrap ann t -> Unwrap ann <$> go t
         IWrap ann pat arg t -> IWrap ann <$> goT pat <*> goT arg <*> go t
         Error ann ty -> Error ann <$> goT ty
+        Constr ann ty i es -> Constr ann <$> goT ty <*> pure i <*> traverse go es
+        Case ann ty arg cs -> Case ann <$> goT ty <*> go arg <*> traverse go cs
         -- boring non-recursive cases
         Constant ann con -> pure $ Constant ann con
         Builtin ann bn -> pure $ Builtin ann bn
 
 -- | Takes a "handler" function to execute when encountering free variables.
 unDeBruijnTyWithM
-    :: forall m uni ann. (MonadReader Levels m, MonadQuote m)
+    :: forall m uni ann. (MonadReader LevelInfo m, MonadQuote m)
     => (Index -> m Unique)
     -> Type NamedTyDeBruijn uni ann
     -> m (Type TyName uni ann)
@@ -184,12 +192,12 @@ unDeBruijnTyWithM h = go
       TyVar ann n -> TyVar ann <$> deBruijnToTyName h n
       -- binder cases
       TyForall ann tn k ty ->
-          -- See NOTE: [DeBruijn indices of Binders]
+          -- See Note [DeBruijn indices of Binders]
           declareBinder $ do
             tn' <- deBruijnToTyName h $ set index deBruijnInitIndex tn
             withScope $ TyForall ann tn' k <$> go ty
       TyLam ann tn k ty ->
-          -- See NOTE: [DeBruijn indices of Binders]
+          -- See Note [DeBruijn indices of Binders]
           declareBinder $ do
             tn' <- deBruijnToTyName h $ set index deBruijnInitIndex tn
             withScope $ TyLam ann tn' k <$> go ty
@@ -197,12 +205,13 @@ unDeBruijnTyWithM h = go
       TyFun ann i o -> TyFun ann <$> go i <*> go o
       TyApp ann fun arg -> TyApp ann <$> go fun <*> go arg
       TyIFix ann pat arg -> TyIFix ann <$> go pat <*> go arg
+      TySOP ann tyls -> TySOP ann <$> (traverse . traverse) go tyls
       -- boring non-recursive cases
-      TyBuiltin ann con -> pure $ TyBuiltin ann con
+      TyBuiltin ann someUni -> pure $ TyBuiltin ann someUni
 
 -- | Takes a "handler" function to execute when encountering free variables.
 unDeBruijnTermWithM
-    :: forall m uni fun ann. (MonadReader Levels m, MonadQuote m)
+    :: forall m uni fun ann. (MonadReader LevelInfo m, MonadQuote m)
     => (Index -> m Unique)
     -> Term NamedTyDeBruijn NamedDeBruijn uni fun ann
     -> m (Term TyName Name uni fun ann)
@@ -217,12 +226,12 @@ unDeBruijnTermWithM h = go
         Var ann n -> Var ann <$> deBruijnToName h n
         -- binder cases
         TyAbs ann tn k t ->
-            -- See NOTE: [DeBruijn indices of Binders]
+            -- See Note [DeBruijn indices of Binders]
             declareBinder $ do
               tn' <- deBruijnToTyName h $ set index deBruijnInitIndex tn
               withScope $ TyAbs ann tn' k <$> go t
         LamAbs ann n ty t ->
-            -- See NOTE: [DeBruijn indices of Binders]
+            -- See Note [DeBruijn indices of Binders]
             declareBinder $ do
               n' <- deBruijnToName h $ set index deBruijnInitIndex n
               withScope $ LamAbs ann n' <$> goT ty <*> go t
@@ -232,6 +241,8 @@ unDeBruijnTermWithM h = go
         Unwrap ann t -> Unwrap ann <$> go t
         IWrap ann pat arg t -> IWrap ann <$> goT pat <*> goT arg <*> go t
         Error ann ty -> Error ann <$> goT ty
+        Constr ann ty i es -> Constr ann <$> goT ty <*> pure i <*> traverse go es
+        Case ann ty arg cs -> Case ann <$> goT ty <*> go arg <*> traverse go cs
         -- boring non-recursive cases
         Constant ann con -> pure $ Constant ann con
         Builtin ann bn -> pure $ Builtin ann bn

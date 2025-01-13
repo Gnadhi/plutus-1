@@ -1,8 +1,8 @@
--- editorconfig-checker-disable-file
 {-# LANGUAGE BangPatterns        #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications    #-}
 {-# LANGUAGE TypeFamilies        #-}
+{-# LANGUAGE TypeOperators       #-}
 module Main where
 
 import Criterion.Main
@@ -59,11 +59,11 @@ consN n = applyN n (cons ())
 consNSlab :: (RandomAccessList e, Element e ~ ()) => Word64 -> e -> e
 consNSlab n = consNSlabM (n `div` 10) 10
 
-{-# INLINE consNSlabM #-}
 -- | Conses on 'n' slabs of size 'm'
 consNSlabM :: (RandomAccessList e, Element e ~ ()) => Word64 -> Word64 -> e -> e
 consNSlabM slabNo slabSize = applyN slabNo (consSlab slab)
    where slab = fromJust $ NEV.replicate (fromIntegral slabSize) ()
+{-# INLINE consNSlabM #-}
 
 -- | Accesses the given indices.
 query :: (RandomAccessList e, Element e ~ ()) => [Word64] -> e -> Element e
@@ -71,7 +71,8 @@ query [] _     = ()
 query (i:is) d = indexZero d i `seq` query is d
 
 -- | A mixed worload.
-mix :: (RandomAccessList e, Element e ~ ()) => Word64 -> Word64 -> Word64 -> Word64 -> Word64 -> [Word64] -> e -> Element e
+mix :: (RandomAccessList e, Element e ~ ()) =>
+    Word64 -> Word64 -> Word64 -> Word64 -> Word64 -> [Word64] -> e -> Element e
 mix sz front cons1 back cons2 rand d =
     query [0..front] d
     `seq`

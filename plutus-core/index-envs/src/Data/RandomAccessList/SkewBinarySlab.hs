@@ -1,8 +1,8 @@
--- editorconfig-checker-disable-file
 {-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE LambdaCase           #-}
 {-# LANGUAGE PatternSynonyms      #-}
 {-# LANGUAGE TypeFamilies         #-}
+{-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
 module Data.RandomAccessList.SkewBinarySlab
@@ -17,7 +17,7 @@ module Data.RandomAccessList.SkewBinarySlab
 import Data.Bits (unsafeShiftR)
 import Data.Vector.NonEmpty qualified as NEV
 import Data.Word
-import GHC.Exts
+import GHC.Exts (IsList, toList)
 
 import Data.RandomAccessList.Class qualified as RAL
 
@@ -48,7 +48,8 @@ So it's not an unqualified win, but it may be better in some cases.
 -- Why not just store `NonEmptyVector`s and add singleton values by making singleton
 -- vectors? The answer is that using only vectors makes simple consing significantly
 -- slower, and doesn't obviously make the other code paths faster.
--- | The values that can be stored in a node. Either a single value, or a non-empty vector of values.
+-- | The values that can be stored in a node. Either a single value, or a non-empty vector of
+-- values.
 data Values a = One a | Many {-# UNPACK #-} !(NEV.NonEmptyVector a)
     deriving stock (Eq, Show)
 
@@ -130,10 +131,10 @@ data RAList a = BHead
 instance Eq a => Eq (RAList a) where
     l == l' = toList l == toList l'
 
-{-# INLINABLE null #-}
 null :: RAList a -> Bool
 null Nil = True
 null _   = False
+{-# INLINABLE null #-}
 
 {-# complete Cons, Nil #-}
 {-# complete BHead, Nil #-}
@@ -153,14 +154,14 @@ consValues x l = case l of
     ts -> BHead 1 (Leaf x) ts
 
 -- O(1) worst-case
-{-# INLINE cons #-}
 cons :: a -> RAList a -> RAList a
 cons x = consValues (One x)
+{-# INLINE cons #-}
 
 -- O(1) worst-case
-{-# INLINE consSlab #-}
 consSlab :: NEV.NonEmptyVector a -> RAList a -> RAList a
 consSlab x = consValues (Many x)
+{-# INLINE consSlab #-}
 
 -- /O(1)/
 -- 'uncons' is a bit funny: if we uncons a vector of values

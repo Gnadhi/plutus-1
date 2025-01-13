@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module PlutusIR.Generators.AST
     ( module Export
+    , discardIfAnyConstant
     , genProgram
     , genTerm
     , genBinding
@@ -15,15 +16,25 @@ module PlutusIR.Generators.AST
     ) where
 
 import PlutusIR
+import PlutusIR.Core.Plated
 
 import PlutusCore.Default qualified as PLC
-import PlutusCore.Generators.Hedgehog.AST as Export (AstGen, genBuiltin, genConstant, genKind, genVersion, runAstGen,
-                                                     simpleRecursive)
+import PlutusCore.Generators.Hedgehog.AST as Export (AstGen, genBuiltin, genConstant, genKind,
+                                                     genVersion, runAstGen, simpleRecursive)
 import PlutusCore.Generators.Hedgehog.AST qualified as PLC
 
+import Control.Lens (andOf, to)
 import Hedgehog hiding (Rec, Var)
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
+import Universe
+
+discardIfAnyConstant
+  :: MonadGen m
+  => (Some (ValueOf uni) -> Bool)
+  -> m (Program tyname name uni fun ann)
+  -> m (Program tyname name uni fun ann)
+discardIfAnyConstant p = Gen.filterT . andOf $ progTerm . termConstantsDeep . to (not . p)
 
 genName :: PLC.AstGen Name
 genName = Gen.filterT (not . isPirKw . _nameText) PLC.genName where
@@ -67,7 +78,8 @@ genType = simpleRecursive nonRecursive recursive where
     lamGen = TyLam () <$> genTyName <*> genKind <*> genType
     forallGen = TyForall () <$> genTyName <*> genKind <*> genType
     applyGen = TyApp () <$> genType <*> genType
-    recursive = [funGen, applyGen]
+    sopGen = TySOP () <$> (Gen.list (Range.linear 0 10) (Gen.list (Range.linear 0 10) genType))
+    recursive = [funGen, applyGen, sopGen]
     nonRecursive = [varGen, lamGen, forallGen]
 
 genTerm :: PLC.AstGen (Term TyName Name PLC.DefaultUni PLC.DefaultFun ())
@@ -79,10 +91,12 @@ genTerm = simpleRecursive nonRecursive recursive where
     applyGen = Apply () <$> genTerm <*> genTerm
     unwrapGen = Unwrap () <$> genTerm
     wrapGen = IWrap () <$> genType <*> genType <*> genTerm
+    constrGen = Constr () <$> genType <*> Gen.word64 (Range.linear 0 10) <*> Gen.list (Range.linear 0 10) genTerm
+    caseGen = Case () <$> genType <*> genTerm <*> Gen.list (Range.linear 0 10) genTerm
     errorGen = Error () <$> genType
     letGen = Let () <$> genRecursivity <*> Gen.nonEmpty (Range.linear 1 10) genBinding <*> genTerm
-    recursive = [absGen, instGen, lamGen, applyGen, unwrapGen, wrapGen, letGen]
+    recursive = [absGen, instGen, lamGen, applyGen, unwrapGen, wrapGen, letGen, constrGen, caseGen]
     nonRecursive = [varGen, Constant () <$> genConstant, Builtin () <$> genBuiltin, errorGen]
 
 genProgram :: PLC.AstGen (Program TyName Name PLC.DefaultUni PLC.DefaultFun ())
-genProgram = Program () <$> genTerm
+genProgram = Program () <$> genVersion <*> genTerm

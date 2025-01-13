@@ -33,8 +33,8 @@ import PlutusCore.Generators.Hedgehog.Utils
 import PlutusCore.Builtin
 import PlutusCore.Core
 import PlutusCore.Default
-import PlutusCore.Name
-import PlutusCore.Pretty (PrettyConst, prettyConst)
+import PlutusCore.Name.Unique
+import PlutusCore.Pretty (PrettyConst, botRenderContext, prettyConst)
 import PlutusCore.Quote
 
 import Control.Monad.Morph qualified as Morph
@@ -87,7 +87,7 @@ instance ( PrettyBy config (Plain Term uni fun)
     prettyBy config (IterAppValue term pia y) = parens $ fold
         [ "{ ", prettyBy config term, line
         , "| ", prettyBy config pia, line
-        , "| ", prettyConst y, line
+        , "| ", prettyConst botRenderContext y, line
         , "}"
         ]
 
@@ -110,7 +110,7 @@ revealUnique (Name name uniq) =
 withTypedBuiltinGen
     :: Monad m
     => Proxy fun
-    -> (forall a. (KnownTypeAst DefaultUni a, MakeKnown (Plain Term DefaultUni fun) a) =>
+    -> (forall a. (KnownTypeAst TyName DefaultUni a, MakeKnown (Plain Term DefaultUni fun) a) =>
             TypeRep a -> GenT m c)
     -> GenT m c
 withTypedBuiltinGen _ k = Gen.choice
@@ -143,7 +143,7 @@ genIterAppValue (Denotation object embed meta scheme) = result where
         return $ IterAppValue term pia y
     go (TypeSchemeArrow schB) term args f = do  -- Another argument is required.
         BuiltinGensT genTb <- ask
-        TermOf v x <- liftT $ genTb typeRep  -- Get a Haskell and the correspoding PLC values.
+        TermOf v x <- liftT $ genTb typeRep  -- Get a Haskell and the corresponding PLC values.
         let term' = Apply () term v          -- Apply the term to the PLC value.
             args' = args . (v :)             -- Append the PLC value to the spine.
             y     = f x                      -- Apply the Haskell function to the generated argument.

@@ -7,7 +7,7 @@ module PlutusCore.Examples.Data.List
 import PlutusCore.Core
 import PlutusCore.Default
 import PlutusCore.MkPlc
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Quote
 
 import PlutusCore.StdLib.Data.Function
@@ -19,9 +19,9 @@ import PlutusCore.Examples.Builtins
 --
 -- /\(a :: *) -> \(f : a -> a) ->
 --     fix {list a} {list a} \(rec : list a -> list a) (xs : list a) ->
---         caseList {a} xs {list a} xs \(x : a) (xs' : list a) -> cons {a} (f x) (rec xs')
-omapList :: Term TyName Name DefaultUni (Either DefaultFun ExtensionFun) ()
-omapList = runQuote $ do
+--         matchList {a} xs {list a} xs \(x : a) (xs' : list a) -> cons {a} (f x) (rec xs')
+omapList :: MatchOption -> Term TyName Name DefaultUni (Either DefaultFun ExtensionFun) ()
+omapList optMatch = runQuote $ do
     a   <- freshTyName "a"
     f   <- freshName "f"
     rec <- freshName "rec"
@@ -29,17 +29,17 @@ omapList = runQuote $ do
     x   <- freshName "x"
     xs' <- freshName "xs'"
     let listA = TyApp () list $ TyVar () a
-        unwrap' ann = apply ann . tyInst () (mapFun Left caseList) $ TyVar () a
+        unwrap' ann = apply ann . tyInst () (mapFun Left (matchList optMatch)) $ TyVar () a
     return
         . tyAbs () a (Type ())
         . lamAbs () f (TyFun () (TyVar () a) $ TyVar () a)
-        . apply () (mkIterInst () fix [listA, listA])
+        . apply () (mkIterInstNoAnn fix [listA, listA])
         . lamAbs () rec (TyFun () listA listA)
         . lamAbs () xs listA
         . apply () (apply () (tyInst () (unwrap' () (var () xs)) listA) $ var () xs)
         . lamAbs () x (TyVar () a)
         . lamAbs () xs' listA
-        $ mkIterApp () (tyInst () (builtin () $ Left MkCons) $ TyVar () a)
+        $ mkIterAppNoAnn (tyInst () (builtin () $ Left MkCons) $ TyVar () a)
             [ apply () (var () f) $ var () x
             , apply () (var () rec) $ var () xs'
             ]

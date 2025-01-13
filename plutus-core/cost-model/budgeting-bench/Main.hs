@@ -1,14 +1,12 @@
--- editorconfig-checker-disable-file
-{-# LANGUAGE TypeOperators #-}
-
 -- See CostModelGeneration.md
 module Main (main) where
 
 import CriterionExtensions (BenchmarkingPhase (Continue, Start), criterionMainWith)
 
+import Benchmarks.Bitwise qualified
 import Benchmarks.Bool qualified
 import Benchmarks.ByteStrings qualified
-import Benchmarks.CryptoAndHashes qualified
+import Benchmarks.Crypto qualified
 import Benchmarks.Data qualified
 import Benchmarks.Integers qualified
 import Benchmarks.Lists qualified
@@ -42,30 +40,27 @@ import System.Random (getStdGen)
 
 main :: IO ()
 main = do
-  gen <- System.Random.getStdGen  -- We use the initial state of gen repeatedly below, but that doesn't matter.
+  -- We use the initial state of gen repeatedly below, but that doesn't matter.
+  gen <- System.Random.getStdGen
 
   criterionMainWith
        Start
        defaultConfig $
-            Benchmarks.Bool.makeBenchmarks            gen
-        <>  Benchmarks.ByteStrings.makeBenchmarks     gen
-        <>  Benchmarks.CryptoAndHashes.makeBenchmarks gen
-        <>  Benchmarks.Data.makeBenchmarks            gen
-        <>  Benchmarks.Integers.makeBenchmarks        gen
-        <>  Benchmarks.Lists.makeBenchmarks           gen
-        <>  Benchmarks.Misc.makeBenchmarks            gen
-        <>  Benchmarks.Pairs.makeBenchmarks           gen
-        <>  Benchmarks.Strings.makeBenchmarks         gen
-        <>  Benchmarks.Tracing.makeBenchmarks         gen
-        <>  Benchmarks.Unit.makeBenchmarks            gen
+           Benchmarks.Bitwise.makeBenchmarks
+        <> Benchmarks.Bool.makeBenchmarks        gen
+        <> Benchmarks.ByteStrings.makeBenchmarks gen
+        <> Benchmarks.Crypto.makeBenchmarks      gen
+        <> Benchmarks.Data.makeBenchmarks        gen
+        <> Benchmarks.Integers.makeBenchmarks    gen
+        <> Benchmarks.Lists.makeBenchmarks       gen
+        <> Benchmarks.Misc.makeBenchmarks        gen
+        <> Benchmarks.Pairs.makeBenchmarks       gen
+        <> Benchmarks.Strings.makeBenchmarks     gen
+        <> Benchmarks.Tracing.makeBenchmarks     gen
+        <> Benchmarks.Unit.makeBenchmarks        gen
 
   {- Run the nop benchmarks with a large time limit (30 seconds) in an attempt to
      get accurate results. -}
-  -- FIXME: this doesn't quite work.  If you specify a benchmark name on the
-  -- command line and it's in the first group then it'll run but you'll get an
-  -- error when the argument gets passed to the nop benchmarks below (but the
-  -- data will still be generated and saved in benching.csv).
-
   criterionMainWith
        Continue
        (defaultConfig { C.timeLimit = 30 }) $

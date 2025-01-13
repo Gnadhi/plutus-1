@@ -8,7 +8,7 @@ module PlutusIR.Normalize
     ) where
 
 import PlutusCore.Core as PLC (Normalized (..))
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Normalize as Export (normalizeType)
 import PlutusCore.Normalize.Internal hiding (normalizeTypesInM)
 import PlutusCore.Quote
@@ -30,7 +30,7 @@ normalizeTypesIn = rename >=> runNormalizeTypeT . normalizeTypesInM
 normalizeTypesInProgram
     :: (HasUnique tyname TypeUnique, HasUnique name TermUnique, MonadQuote m, HasUniApply uni)
     => Program tyname name uni fun ann -> m (Program tyname name uni fun ann)
-normalizeTypesInProgram (Program x t) = Program x <$> normalizeTypesIn t
+normalizeTypesInProgram (Program x v t) = Program x v <$> normalizeTypesIn t
 
 -- | Normalize every 'Type' in a 'Term'.
 -- Mirrors the `normalizeTypesInM` of 'PlutusCore.Normalize.Internal', working on PIR.Term instead

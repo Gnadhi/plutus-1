@@ -1,4 +1,5 @@
 -- editorconfig-checker-disable-file
+{-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
@@ -14,6 +15,7 @@ module UntypedPlutusCore.Evaluation.Machine.Cek.ExBudgetMode
     , TallyingSt (..)
     , RestrictingSt (..)
     , Hashable
+    , monoidalBudgeting
     , counting
     , enormousBudget
     , tallying
@@ -31,7 +33,7 @@ import PlutusCore.Evaluation.Machine.Exception
 import PlutusCore.Evaluation.Machine.ExMemory (ExCPU (..), ExMemory (..))
 
 import Control.Lens (imap)
-import Control.Monad.Except
+import Control.Monad (when)
 import Data.Hashable (Hashable)
 import Data.HashMap.Monoidal as HashMap
 import Data.Map.Strict qualified as Map
@@ -111,7 +113,9 @@ instance Pretty RestrictingSt where
     pretty (RestrictingSt budget) = parens $ "final budget:" <+> pretty budget <> line
 
 -- | For execution, to avoid overruns.
-restricting :: forall uni fun . (PrettyUni uni fun) => ExRestrictingBudget -> ExBudgetMode RestrictingSt uni fun
+restricting
+    :: ThrowableBuiltins uni fun
+    => ExRestrictingBudget -> ExBudgetMode RestrictingSt uni fun
 restricting (ExRestrictingBudget initB@(ExBudget cpuInit memInit)) = ExBudgetMode $ do
     -- We keep the counters in a PrimArray. This is better than an STRef since it stores its contents unboxed.
     --
@@ -139,9 +143,13 @@ restricting (ExRestrictingBudget initB@(ExBudget cpuInit memInit)) = ExBudgetMod
             CekM $ writeCpu cpuLeft'
             CekM $ writeMem memLeft'
             when (cpuLeft' < 0 || memLeft' < 0) $ do
-                let budgetLeft = ExBudget cpuLeft' memLeft'
+                let -- You'd think whether the budget is computed strictly or not before throwing
+                    -- an error isn't important, but GHC refuses to unbox the second argument of
+                    -- @spend@ without this bang. Bangs on @cpuLeft'@ and @memLeft'@ don't help
+                    -- either as those are forced by 'writeCpu' and 'writeMem' anyway. Go figure.
+                    !budgetLeft = ExBudget cpuLeft' memLeft'
                 throwingWithCause _EvaluationError
-                    (UserEvaluationError . CekOutOfExError $ ExRestrictingBudget budgetLeft)
+                    (OperationalEvaluationError . CekOutOfExError $ ExRestrictingBudget budgetLeft)
                     Nothing
         spender = CekBudgetSpender spend
         remaining = ExBudget <$> readCpu <*> readMem
@@ -152,5 +160,5 @@ restricting (ExRestrictingBudget initB@(ExBudget cpuInit memInit)) = ExBudgetMod
     pure $ ExBudgetInfo spender final cumulative
 
 -- | 'restricting' instantiated at 'enormousBudget'.
-restrictingEnormous :: (PrettyUni uni fun) => ExBudgetMode RestrictingSt uni fun
+restrictingEnormous :: ThrowableBuiltins uni fun => ExBudgetMode RestrictingSt uni fun
 restrictingEnormous = restricting enormousBudget

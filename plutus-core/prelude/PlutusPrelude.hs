@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
+{-# LANGUAGE CPP                   #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -10,6 +11,7 @@ module PlutusPrelude
     ( -- * Reexports from base
       (&)
     , (&&&)
+    , (>>>)
     , (<&>)
     , toList
     , first
@@ -20,6 +22,8 @@ module PlutusPrelude
     , fromMaybe
     , guard
     , foldl'
+    , for_
+    , traverse_
     , fold
     , for
     , throw
@@ -29,6 +33,7 @@ module PlutusPrelude
     , ($>)
     , fromRight
     , isRight
+    , isLeft
     , void
     , through
     , coerce
@@ -71,6 +76,7 @@ module PlutusPrelude
     , (?)
     , ensure
     , asksM
+    , timesA
     -- * Pretty-printing
     , Doc
     , ShowPretty (..)
@@ -86,33 +92,47 @@ module PlutusPrelude
     -- * Text
     , showText
     , Default (def)
+    -- * Lists
+    , zipExact
+    , allSame
+    , distinct
+    , unsafeFromRight
+    , tryError
+    , modifyError
+    , lowerInitialChar
     ) where
 
-import Control.Applicative (Alternative (..), liftA2)
-import Control.Arrow ((&&&))
+import Control.Applicative
+import Control.Arrow ((&&&), (>>>))
 import Control.Composition ((.*))
 import Control.DeepSeq (NFData)
 import Control.Exception (Exception, throw)
-import Control.Lens
-import Control.Monad.Reader
-import Data.Array
+import Control.Lens (Fold, Lens', ala, lens, over, set, view, (%~), (&), (.~), (<&>), (^.))
+import Control.Monad
+import Control.Monad.Except (ExceptT, MonadError, catchError, runExceptT, throwError)
+import Control.Monad.Reader (MonadReader, ask)
+import Data.Array (Array, Ix, listArray)
 import Data.Bifunctor (first, second)
+import Data.Char (toLower)
 import Data.Coerce (Coercible, coerce)
 import Data.Default.Class
-import Data.Either (fromRight, isRight)
-import Data.Foldable (fold, toList)
+import Data.Either (fromRight, isLeft, isRight)
+import Data.Foldable (fold, for_, toList, traverse_)
 import Data.Function (on)
 import Data.Functor (($>))
+#if ! MIN_VERSION_base(4,20,0)
 import Data.List (foldl')
+#endif
 import Data.List.Extra (enumerate)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (fromMaybe, isJust, isNothing)
+import Data.Semigroup (Endo (..), stimes)
 import Data.Text qualified as T
 import Data.Traversable (for)
 import Data.Typeable (Typeable)
 import Data.Word (Word8)
-import Debug.Trace
-import GHC.Generics
+import Debug.Trace (trace, traceShowId)
+import GHC.Generics (Generic)
 import GHC.Natural (Natural)
 import Prettyprinter
 import Text.PrettyBy.Default
@@ -221,3 +241,47 @@ showText = T.pack . show
 -- | Compose two folds to make them run in parallel. The results are concatenated.
 (<^>) :: Fold s a -> Fold s a -> Fold s a
 (f1 <^> f2) g s = f1 g s *> f2 g s
+
+-- | Zips two lists of the same length together, returning 'Nothing' if they are not
+-- the same length.
+zipExact :: [a] -> [b] -> Maybe [(a,b)]
+zipExact [] []         = Just []
+zipExact (a:as) (b:bs) = (:) (a, b) <$> zipExact as bs
+zipExact _ _           = Nothing
+
+-- | Similar to Maybe's `fromJust`. Returns the `Right` and errors out with the show instance
+-- of the `Left`.
+unsafeFromRight :: (Show e) => Either e a -> a
+unsafeFromRight (Right a) = a
+unsafeFromRight (Left e)  = error $ show e
+
+-- | function recursively applied N times
+timesA :: Natural -> (a -> a) -> a -> a
+timesA = ala Endo . stimes
+
+-- | A 'MonadError' version of 'try'.
+--
+-- TODO: remove when we switch to mtl>=2.3
+tryError :: MonadError e m => m a -> m (Either e a)
+tryError a = (Right <$> a) `catchError` (pure . Left)
+{-# INLINE tryError #-}
+
+{- A different 'MonadError' analogue to the 'withExceptT' function.
+Modify the value (and possibly the type) of an error in an @ExceptT@-transformed
+monad, while stripping the @ExceptT@ layer.
+
+TODO: remove when we switch to mtl>=2.3.1
+-}
+modifyError :: MonadError e' m => (e -> e') -> ExceptT e m a -> m a
+modifyError f m = runExceptT m >>= either (throwError . f) pure
+
+allSame :: Eq a => [a] -> Bool
+allSame []     = True
+allSame (x:xs) = all (x ==) xs
+
+distinct :: Eq a => [a] -> Bool
+distinct = not . allSame
+
+lowerInitialChar :: String -> String
+lowerInitialChar []     = []
+lowerInitialChar (c:cs) = toLower c : cs

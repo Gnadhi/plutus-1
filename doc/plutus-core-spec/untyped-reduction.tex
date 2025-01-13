@@ -1,4 +1,4 @@
-\section{Term Reduction}
+\section{Term reduction}
 \label{sec:reduction}
 
 This section defines the semantics of (untyped) Plutus Core.
@@ -37,7 +37,7 @@ $$%
 
   I'm somewhat tempted to dump this in favour of SOS.}
 \kwxm{Do we need a uniqueness condition on names somewhere?}
-    
+
 We define the semantics of Plutus Core using contextual semantics (or reduction
 semantics): see~\cite{Felleisen-Hieb} or~\cite{Felleisen-Semantics-Engineering}
 or~\cite[5.3]{Harper:PFPL}, for example.  We use $A$ to denote a partial
@@ -58,9 +58,11 @@ $\lamU{x}{N}$.%
 \begin{subfigure}[c]{\linewidth}
     \centering
     \[\begin{array}{lrclr}
-        \textrm{Frame} & f  & ::=   & \inAppLeftFrame{M}          & \textrm{left application}\\
-                       &   &     & \inAppRightFrame{V}            & \textrm{right application}\\
-                       &   &     & \inForceFrame                  & \textrm{force}
+        \textrm{Frame} & f  & ::=   & \inAppLeftFrame{M}                                       & \textrm{left application}\\
+                       &   &     & \inAppRightFrame{V}                                         & \textrm{right application}\\
+                       &   &     & \inForceFrame                                               & \textrm{force}\\
+                       &   &     & \inConstrFrame{i}{\repetition{V}}{\repetition{M}}           & \textrm{constructor argument}\\
+                       &   &     & \inCaseFrame{\repetition{M}}                                & \textrm{case scrutinee}
     \end{array}\]
     \caption{Grammar of reduction frames for Plutus Core}
     \label{fig:untyped-reduction-frames}
@@ -109,6 +111,13 @@ $\lamU{x}{N}$.%
         \UnaryInfC{$\step{\force{\delay{M}}}{M}$}
     \end{prooftree}
 
+    % case (constr i vs) cs -> [c_i vs]
+    \begin{prooftree}
+        \AxiomC{$0 \leq i \leq m$}
+        % \RightLabel{\textsf{case-of-constr}}
+        \UnaryInfC{$\step{\kase{\constr{i}{\repetition{V}}}{U_0 \ldots U_m}}{\app{U_i}{\repetition{V}}}$}
+    \end{prooftree}
+
     % Saturated force
     \begin{prooftree}
       \AxiomC{$\length(A) = \chi(\beta(A))-1$}
@@ -126,7 +135,7 @@ $\lamU{x}{N}$.%
         \BinaryInfC{$\step{\force{A}}{A}$}
     \end{prooftree}
 
-%    \hfill\begin{minipage}{0.3\linewidth}  
+%    \hfill\begin{minipage}{0.3\linewidth}
       \begin{prooftree}
         \AxiomC{} % If we're putting these side by side we need \strut here to get rules aligned
         % \RightLabel{\textsf{error}}
@@ -140,7 +149,7 @@ $\lamU{x}{N}$.%
     \end{prooftree}
 % \end{minipage}\hfill\hfill %% Don't know why we need two \hfills here but only one at the start
 % \\
-    \caption{Reduction via Contextual Semantics} %% Oops
+    \caption{Reduction via contextual semantics} %% Oops
     \label{fig:untyped-reduction}
 \end{subfigure}
 
@@ -179,5 +188,5 @@ program to be closed.
   \textit{do} need special rules for the final argument because if $M \in A$ we
   have to look at $b$ to make sure that the final argument (or force) is the
   right kind of thing.}
-  
-  
+
+

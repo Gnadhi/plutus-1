@@ -3,13 +3,14 @@
 
 module PlutusCore.Examples.Data.Data
     ( ofoldrData
+    , exampleData
     ) where
 
 import PlutusCore.Core
-import PlutusCore.Data
+import PlutusCore.Data as Data
 import PlutusCore.Default
 import PlutusCore.MkPlc
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Quote
 
 import PlutusCore.StdLib.Data.Data
@@ -17,6 +18,7 @@ import PlutusCore.StdLib.Data.Function
 import PlutusCore.StdLib.Data.Integer
 import PlutusCore.StdLib.Data.List
 import PlutusCore.StdLib.Data.Pair
+import PlutusCore.StdLib.Data.Unit
 
 import PlutusCore.Examples.Builtins
 import PlutusCore.Examples.Data.List
@@ -41,7 +43,7 @@ import Data.ByteString (ByteString)
 -- >      (fI : integer -> r)
 -- >      (fB : bytestring -> r) ->
 -- >          fix {data} {r} \(rec : data -> r) (d : data) ->
--- >              caseData
+-- >              matchData
 -- >                  d
 -- >                  {r}
 -- >                  (\(i : integer) (ds : list data) -> fConstr i (omapList {data} rec ds)
@@ -50,8 +52,8 @@ import Data.ByteString (ByteString)
 -- >                  (\(ds : list data) -> fList (omapList {data} rec ds))
 -- >                  fI
 -- >                  fB
-ofoldrData :: Term TyName Name DefaultUni (Either DefaultFun ExtensionFun) ()
-ofoldrData = runQuote $ do
+ofoldrData :: MatchOption -> Term TyName Name DefaultUni (Either DefaultFun ExtensionFun) ()
+ofoldrData optMatch = runQuote $ do
     let r = dataTy
     fConstr <- freshName "fConstr"
     fMap    <- freshName "fMap"
@@ -65,36 +67,57 @@ ofoldrData = runQuote $ do
     es      <- freshName "es"
     let listData = mkTyBuiltin @_ @[Data] ()
         listR = TyApp () list r
-        opair a = mkIterTyApp () pair [a, a]
-        unwrap' ann = apply ann $ mapFun Left caseData
+        opair a = mkIterTyAppNoAnn pair [a, a]
+        unwrap' ann = apply ann $ mapFun Left (matchData optMatch)
     return
         . lamAbs () fConstr (TyFun () integer $ TyFun () listR r)
         . lamAbs () fMap (TyFun () (TyApp () list $ opair r) r)
         . lamAbs () fList (TyFun () listR r)
         . lamAbs () fI (TyFun () integer r)
         . lamAbs () fB (TyFun () (mkTyBuiltin @_ @ByteString ()) r)
-        . apply () (mkIterInst () fix [dataTy, r])
+        . apply () (mkIterInstNoAnn fix [dataTy, r])
         . lamAbs () rec (TyFun () dataTy r)
         . lamAbs () d dataTy
-        $ mkIterApp () (tyInst () (unwrap' () (var () d)) r)
+        $ mkIterAppNoAnn (tyInst () (unwrap' () (var () d)) r)
             [   lamAbs () i integer
               . lamAbs () ds listData
-              $ mkIterApp () (var () fConstr)
+              $ mkIterAppNoAnn (var () fConstr)
                   [ var () i
-                  , mkIterApp () (tyInst () omapList dataTy) [var () rec, var () ds]
+                  , mkIterAppNoAnn (tyInst () (omapList optMatch) dataTy)
+                      [var () rec, var () ds]
                   ]
             ,   lamAbs () es (TyApp () list $ opair dataTy)
               . apply () (var () fMap)
-              $ mkIterApp () (tyInst () omapList $ opair dataTy)
+              $ mkIterAppNoAnn (tyInst () (omapList optMatch) $ opair dataTy)
                   [ apply () (tyInst () obothPair dataTy) $ var () rec
                   , var () es
                   ]
             ,   lamAbs () ds listData
               . apply () (var () fList)
-              $ mkIterApp () (tyInst () omapList dataTy)
+              $ mkIterAppNoAnn (tyInst () (omapList optMatch) dataTy)
                   [ var () rec
                   , var () ds
                   ]
             , var () fI
             , var () fB
+            ]
+
+-- | Just a random 'Data' object.
+exampleData :: Term tyname Name DefaultUni (Either DefaultFun ExtensionFun) ()
+exampleData = runQuote $ do
+    x <- freshName "x"
+    pure
+        . mkIterLamAbs (replicate 4 $ VarDecl () x unit)
+        . mkConstant ()
+        $ Data.Constr 1
+            [ Map
+                [ ( B "abcdef"
+                  , Data.Constr 2
+                      [ B ""
+                      , I 0
+                      ]
+                  )
+                ]
+            , List [List [List [List [I 123456]], B "ffffffffffffffffffffffffffffffffffffffffff"]]
+            , I 42
             ]

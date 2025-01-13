@@ -16,7 +16,9 @@ import PlutusTx.Compiler.Error
 import PlutusTx.Coverage
 import PlutusTx.PLCTypes
 
+import PlutusIR.Analysis.Builtins qualified as PIR
 import PlutusIR.Compiler.Definitions
+import PlutusIR.Transform.RewriteRules qualified as PIR
 
 import PlutusCore.Annotation
 import PlutusCore.Builtin qualified as PLC
@@ -29,9 +31,9 @@ import GHC.Plugins qualified as GHC
 
 import Control.Monad.Except
 import Control.Monad.Reader
+import Control.Monad.State
 import Control.Monad.Writer
 
-import Data.List.NonEmpty qualified as NE
 import Data.Map qualified as Map
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -49,15 +51,27 @@ data CompileOptions = CompileOptions {
     }
 
 data CompileContext uni fun = CompileContext {
-    ccOpts        :: CompileOptions,
-    ccFlags       :: GHC.DynFlags,
-    ccFamInstEnvs :: GHC.FamInstEnvs,
-    ccNameInfo    :: NameInfo,
-    ccScopes      :: ScopeStack uni,
-    ccBlackholed  :: Set.Set GHC.Name,
-    ccCurDef      :: Maybe LexName,
-    ccModBreaks   :: Maybe GHC.ModBreaks,
-    ccBuiltinVer  :: PLC.BuiltinVersion fun
+    ccOpts             :: CompileOptions,
+    ccFlags            :: GHC.DynFlags,
+    ccFamInstEnvs      :: GHC.FamInstEnvs,
+    ccNameInfo         :: NameInfo,
+    ccScope            :: Scope uni,
+    ccBlackholed       :: Set.Set GHC.Name,
+    ccCurDef           :: Maybe LexName,
+    ccModBreaks        :: Maybe GHC.ModBreaks,
+    ccBuiltinsInfo     :: PIR.BuiltinsInfo uni fun,
+    ccBuiltinCostModel :: PLC.CostingPart uni fun,
+    ccDebugTraceOn     :: Bool,
+    ccRewriteRules     :: PIR.RewriteRules uni fun
+    }
+
+data CompileState = CompileState
+    { -- | The ID of the next step to be taken by the PlutusTx compiler.
+      -- This is used when generating debug traces.
+      csNextStep      :: Int
+      -- | The IDs of the previous steps taken by the PlutusTx compiler leading up to
+      -- the current point. This is used when generating debug traces.
+    , csPreviousSteps :: [Int]
     }
 
 -- | Verbosity level of the Plutus Tx compiler.
@@ -179,6 +193,7 @@ type Compiling uni fun m ann =
     ( MonadError (CompileError uni fun ann) m
     , MonadQuote m
     , MonadReader (CompileContext uni fun) m
+    , MonadState CompileState m
     , MonadDefs LexName uni fun Ann m
     , MonadWriter CoverageIndex m
     )
@@ -207,14 +222,13 @@ Var into a variable, then we always convert it into the same variable, while als
 sure that if we encounter multiple things with the same name we produce fresh variables
 appropriately.
 
-So we have the usual mechanism of carrying around a stack of scopes.
+We keep the scope in a `Reader` monad, so any modifications are only local.
 -}
 
 data Scope uni = Scope (Map.Map GHC.Name (PLCVar uni)) (Map.Map GHC.Name PLCTyVar)
-type ScopeStack uni = NE.NonEmpty (Scope uni)
 
-initialScopeStack :: ScopeStack uni
-initialScopeStack = pure $ Scope Map.empty Map.empty
+initialScope :: Scope uni
+initialScope = Scope Map.empty Map.empty
 
 withCurDef :: Compiling uni fun m ann => LexName -> m a -> m a
 withCurDef name = local (\cc -> cc {ccCurDef=Just name})

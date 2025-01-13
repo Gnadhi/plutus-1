@@ -7,7 +7,7 @@ module PlutusCore.StdLib.Meta.Data.Function
 
 import PlutusCore.Core
 import PlutusCore.MkPlc
-import PlutusCore.Name
+import PlutusCore.Name.Unique
 import PlutusCore.Quote
 
 -- | 'const' as a PLC term.
@@ -26,7 +26,7 @@ constPartial t = runQuote $ do
 -- for it not force the function it receives and instead directly hide it under a lambda.
 --
 -- > etaExpand ty fun = \(x : ty) -> fun x
-etaExpand :: TermLike term TyName Name uni fun => Type TyName uni () -> term () -> term ()
+etaExpand :: TermLike term tyname Name uni fun => Type tyname uni () -> term () -> term ()
 etaExpand ty fun = runQuote $ do
     x <- freshName "x"
     return

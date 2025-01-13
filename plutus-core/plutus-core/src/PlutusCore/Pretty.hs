@@ -7,61 +7,77 @@ module PlutusCore.Pretty
     , IgnorePrettyConfig (..)
     , AttachPrettyConfig (..)
     , Render (..)
+    , PrettyParens
     , display
     , displayBy
+    , juxtRenderContext
     -- * Defaults
-    , prettyPlcDef
-    , displayPlcDef
-    , prettyPlcDebug
-    , displayPlcDebug
+    , prettyPlc
+    , displayPlc
+    , prettyPlcSimple
+    , displayPlcSimple
     -- * Global configuration
     , CondensedErrors (..)
+    , DefaultPrettyPlcStrategy
     , PrettyConfigPlcOptions (..)
     , PrettyConfigPlcStrategy (..)
     , PrettyConfigPlc (..)
     , PrettyPlc
-    , defPrettyConfigPlcOptions
-    , defPrettyConfigPlcClassic
-    , debugPrettyConfigPlcClassic
-    , defPrettyConfigPlcReadable
-    , debugPrettyConfigPlcReadable
+    , prettyConfigPlcOptions
+    , prettyConfigPlcClassic
+    , prettyConfigPlcClassicSimple
+    , prettyConfigPlcReadable
+    , prettyConfigPlcReadableSimple
     -- * Custom functions for PLC types.
-    , prettyPlcClassicDef
-    , prettyPlcClassicDebug
-    , prettyPlcReadableDef
-    , prettyPlcReadableDebug
+    , prettyPlcClassic
+    , prettyPlcClassicSimple
+    , prettyPlcReadable
+    , prettyPlcReadableSimple
     , prettyPlcCondensedErrorBy
     , displayPlcCondensedErrorClassic
     -- * Names
     , PrettyConfigName (..)
     , HasPrettyConfigName (..)
-    , defPrettyConfigName
-    , debugPrettyConfigName
+    , prettyConfigName
+    , prettyConfigNameSimple
     -- * Classic view
     , PrettyConfigClassic (..)
     , PrettyClassicBy
     , PrettyClassic
     , consAnnIf
-    , prettyClassicDef
-    , prettyClassicDebug
+    , prettyClassic
+    , prettyClassicSimple
     -- * Readable view
     , ShowKinds (..)
     , PrettyConfigReadable (..)
+    , prettyReadable
+    , prettyReadableSimple
     , pcrConfigName
     , pcrRenderContext
     , pcrShowKinds
     , PrettyReadableBy
     , PrettyReadable
+    , AsReadable (..)
+    , Parened (..)
+    , inBraces
     , topPrettyConfigReadable
     , botPrettyConfigReadable
     , binderFixity
     , arrowFixity
+    , iterTyForallPrettyM
+    , iterLamAbsPrettyM
+    , iterTyAbsPrettyM
+    , iterArrowPrettyM
+    , iterAppDocM
+    , iterInterAppPrettyM
+    , iterAppPrettyM
     -- * Utils
     , prettyBytes
     , ConstConfig (..)
     , PrettyConst
+    , PrettyUni
+    , ThrowableBuiltins
     , prettyConst
-    , displayConst
     , module Export
     ) where
 
@@ -76,5 +92,4 @@ import PlutusCore.Pretty.Utils
 
 import Text.Pretty
 import Text.PrettyBy
-
 import Text.PrettyBy.Fixity as Export

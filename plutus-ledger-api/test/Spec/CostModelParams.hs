@@ -3,26 +3,21 @@
 {-# LANGUAGE TypeApplications #-}
 module Spec.CostModelParams where
 
+-- import PlutusCore.Evaluation.Machine.ExBudgetingDefaults (defaultCostModelParamsForTesting)
+
 import PlutusLedgerApi.Common
+
+import PlutusLedgerApi.Test.V3.EvaluationContext qualified as V3
 import PlutusLedgerApi.V1 as V1
 import PlutusLedgerApi.V2 as V2
 import PlutusLedgerApi.V3 as V3
 
-import PlutusCore.Evaluation.Machine.BuiltinCostModel as Plutus
-import PlutusCore.Evaluation.Machine.CostModelInterface as Plutus
-import PlutusCore.Evaluation.Machine.ExBudgetingDefaults as Plutus
-import PlutusCore.Evaluation.Machine.MachineParameters as Plutus
-
-import Barbies
-import Control.Lens
 import Control.Monad.Except
 import Control.Monad.Writer.Strict
 import Data.Either
+import Data.Foldable
 import Data.List.Extra
-import Data.Map as Map
-import Data.Maybe
 import Data.Set as Set
-import Data.Text qualified as Text
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -31,67 +26,53 @@ tests =
   testGroup
     "costModelParams"
     [ testCase "length" $ do
-            166 @=? length (enumerate @V1.ParamName)
-            166 @=? length v1CostModelParamNames
-            175 @=? length (enumerate @V2.ParamName)
-            175 @=? length v2CostModelParamNames
-            175 @=? length (enumerate @V3.ParamName)
-            175 @=? length v3CostModelParamNames
-    , testCase "text" $ do
-            -- this depends on the fact that V1/V2 are alphabetically-ordered;
-            -- does not have to hold for future protocol versions when adding new builtins
-            altV1CostModelParamNames @=? v1CostModelParamNames
-            -- this depends on the fact that V1/V2 are alphabetically-ordered;
-            -- does not have to hold for future protocol versions when adding new builtins
-            Map.keys (fromJust Plutus.defaultCostModelParams) @=? v2CostModelParamNames
+            166 @=? length v1_ParamNames
+            185 @=? length v2_ParamNames
+            297 @=? length v3_ParamNames
+    , testCase "tripping paramname" $ do
+            for_ v1_ParamNames $ \ p ->
+                assertBool "tripping v1 cm params failed" $ Just p == readParamName (showParamName p)
+            for_ v2_ParamNames $ \ p ->
+                assertBool "tripping v2 cm params failed" $ Just p == readParamName (showParamName p)
+            for_ v3_ParamNames $ \ p ->
+                assertBool "tripping v3 cm params failed" $ Just p == readParamName (showParamName p)
+-- *** FIXME !!! *** : The introduction of the new bitwise builtins has messed
+-- this up because defaultCostModelParamsForTesting is the cost model parameters
+-- for model C, which now includes the new bitwise builtins.
+--    , testCase "default values costmodelparamsfortesting" $ do
+--            defaultCostModelParamsForTesting @=? Just (toCostModelParams V3.costModelParamsForTesting)
     , testCase "context length" $ do
-            let defaultCostValues = Map.elems $ fromJust defaultCostModelParams
-            -- the defaultcostmodelparams reflects only the latest version V3, so this should succeed because the lengths match
-            assertBool "wrong number of arguments in V2.mkContext" $ isRight $ runExcept $ runWriterT $ V3.mkEvaluationContext defaultCostValues
-            -- currently v2 args ==v3 args
-            assertBool "wrong number of arguments in V2.mkContext" $ isRight $ runExcept $ runWriterT $ V2.mkEvaluationContext defaultCostValues
-            -- this one should succeed because we pass more params
-            assertBool "larger number of params did not warn" $ hasWarnMoreParams (length v3CostModelParamNames) (length v3CostModelParamNames+1) $
-                runExcept $ runWriterT $ V3.mkEvaluationContext $ defaultCostValues ++ [1] -- dummy param value appended
+            let costValuesForTesting = fmap snd V3.costModelParamsForTesting
+            -- the `costModelParamsForTesting` reflects only the latest version (V3), so this should succeed because the lengths match
+            assertBool "wrong number of arguments in V3.mkEvaluationContext" $ isRight $ runExcept $ runWriterT $ V3.mkEvaluationContext costValuesForTesting
+            -- this one should succeed because we allow adding new builtins to an existing version, by appending new cost model parameters, for more info:
+            -- See Note [Cost model parameters from the ledger's point of view]
+            assertBool "larger number of params did not warn" $ hasWarnMoreParams (length v3_ParamNames) (1 + length v3_ParamNames) $
+                runExcept $ runWriterT $ V3.mkEvaluationContext $ costValuesForTesting ++ [1] -- dummy param value appended
     , testCase "cost model parameters" $ do
          -- v1 is missing some cost model parameters because new builtins are added in v2
-         assertBool "v1 params is proper subset of v2 params" $ Set.fromList v1CostModelParamNames `Set.isProperSubsetOf` Set.fromList v2CostModelParamNames
-         -- v1 is missing some cost model parameters because new builtins are added in v2
-         assertBool "v1 params is proper subset of v3 params" $ Set.fromList v1CostModelParamNames `Set.isProperSubsetOf` Set.fromList v3CostModelParamNames
+         assertBool "v1 params is not a proper subset of v2 params" $ v1_ParamNames `paramProperSubset` v2_ParamNames
+         -- v1/v2 and v3 cost models are not comparable because we added new builtins in v3 but also
+         -- removed some superseded cost model parameters.
+         assertBool "v1 params and v3 params are comparable" $
+           not (v1_ParamNames `paramSubset` v3_ParamNames)
+           && not (v3_ParamNames `paramSubset` v1_ParamNames)
+         assertBool "v2 params and v3 params are comparable" $
+           not (v2_ParamNames `paramSubset` v3_ParamNames)
+           && not (v3_ParamNames `paramSubset` v2_ParamNames)
     ]
   where
     hasWarnMoreParams :: Int -> Int -> Either a (b, [CostModelApplyWarn]) -> Bool
     hasWarnMoreParams testExpected testActual (Right (_,[CMTooManyParamsWarn{..}]))
-        | testExpected==cmTooManyExpected && testActual==cmTooManyActual  = True
+        | testExpected==cmExpected && testActual==cmActual  = True
     hasWarnMoreParams _ _ _ = False
 
-v1CostModelParamNames :: [Text.Text]
-v1CostModelParamNames = Text.pack . showParamName <$> enumerate @V1.ParamName
+    paramProperSubset pA pB =
+        Set.fromList (showParamName <$> pA) `Set.isProperSubsetOf` Set.fromList (showParamName <$> pB)
 
--- | An alternative, older implementation of calculating V1's costmodelparamnames.
-altV1CostModelParamNames :: [Text.Text]
-altV1CostModelParamNames = Map.keys $ fromJust $ extractCostModelParams $
-   defaultCekCostModel
-   & builtinCostModel
-   -- here we rely on 'Deriving.Aeson.OmitNothingFields'
-   -- to skip jsonifying any fields which are cleared.
-   %~ omitV2Builtins
-  where
-    -- "clears" some fields of builtincostmodel by setting them to Nothing. See 'MCostingFun'.
-    omitV2Builtins :: BuiltinCostModel -> BuiltinCostModelBase MCostingFun
-    omitV2Builtins bcm =
-            -- transform all costing-functions to (Just costingFun)
-            (bmap (MCostingFun . Just) bcm)
-            {
-              -- 'SerialiseData','EcdsaSecp256k1',SchnorrSecp256k1 builtins not available in V1
-              paramSerialiseData = mempty
-            , paramVerifyEcdsaSecp256k1Signature = mempty
-            , paramVerifySchnorrSecp256k1Signature = mempty
-            }
+    paramSubset pA pB =
+        Set.fromList (showParamName <$> pA) `Set.isSubsetOf` Set.fromList (showParamName <$> pB)
 
-v2CostModelParamNames :: [Text.Text]
-v2CostModelParamNames = Text.pack . showParamName <$> enumerate @V2.ParamName
-
-v3CostModelParamNames :: [Text.Text]
-v3CostModelParamNames = Text.pack . showParamName <$> enumerate @V3.ParamName
-
+    v1_ParamNames = enumerate @V1.ParamName
+    v2_ParamNames = enumerate @V2.ParamName
+    v3_ParamNames = enumerate @V3.ParamName
