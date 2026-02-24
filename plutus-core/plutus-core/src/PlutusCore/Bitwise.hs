@@ -8,6 +8,7 @@
 'ByteString's, and require similar functionality. -}
 module PlutusCore.Bitwise
   ( integerToByteString
+  , integerToBytesBE
   , byteStringToInteger
   , andByteString
   , orByteString
@@ -24,7 +25,7 @@ module PlutusCore.Bitwise
   , maximumOutputLength
   ) where
 
-import PlutusCore.Builtin (BuiltinResult, builtinResultFailure, emit)
+import PlutusCore.Builtin.Result (BuiltinResult, builtinResultFailure, emit)
 
 import Control.Exception (Exception, throwIO, try)
 import Control.Monad (unless, when)
@@ -33,6 +34,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Internal qualified as BSI
 import Data.ByteString.Unsafe qualified as BSU
+import Data.Either (fromRight)
 import Data.Foldable (for_)
 import Data.Primitive.ByteArray (ByteArray (ByteArray), copyByteArrayToAddr)
 import Data.Text (pack)
@@ -48,6 +50,7 @@ import GHC.Exts
   , Ptr (Ptr)
   , clz#
   , indexWord8Array#
+  , inline
   , int2Word#
   , int8ToWord8#
   , intToInt8#
@@ -115,7 +118,7 @@ integerToByteString endiannessArg lengthArg input
        in -- We use fromIntegral here, despite advice to the contrary in general when defining builtin
           -- denotations. This is because, if we've made it this far, we know that overflow or truncation
           -- are impossible: we've checked that whatever we got given fits inside a (non-negative) Int.
-          case unsafeIntegerToByteString endianness (fromIntegral lengthArg) input of
+          case inline unsafeIntegerToByteString endianness (fromIntegral lengthArg) input of
             Left err -> case err of
               NegativeInput -> do
                 emit "integerToByteString: cannot convert negative Integer"
@@ -289,6 +292,13 @@ unsafeIntegerToByteString requestedByteOrder requestedLength input = case input 
           poke pEnd (byteSwap16 wStart)
           poke pStart (byteSwap16 wEnd)
           finishUp (plusPtr ptr 2) (remaining - 4)
+{-# INLINE unsafeIntegerToByteString #-}
+
+-- | Returns mempty for negative input.
+integerToBytesBE :: Integer -> ByteString
+integerToBytesBE 0 = BS.pack [0]
+integerToBytesBE n = fromRight mempty $ unsafeIntegerToByteString BigEndian 0 n
+{-# INLINE integerToBytesBE #-}
 
 {-| Conversion from 'ByteString' to 'Integer', as per
 [CIP-121](https://github.com/cardano-foundation/CIPs/tree/master/CIP-0121). -}
