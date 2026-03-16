@@ -75,6 +75,7 @@ library
     PlutusTx.Compiler.Utils
     PlutusTx.PIRTypes
     PlutusTx.PLCTypes
+    PlutusTx.Plugin.Unsupported
 
   build-depends:
     , array
@@ -189,6 +190,7 @@ test-suite plutus-tx-plugin-tests
     TH.Spec
     TH.TestTH
     Unicode.Spec
+    Unsupported.Spec
 
   build-depends:
     , base                             >=4.9   && <5
