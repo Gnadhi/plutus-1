@@ -19,7 +19,9 @@ data-files:
   common/templates/*.tpl
   force-delay/data/*.flat
   marlowe/scripts/rolepayout/*.benchmark
+  marlowe/scripts/rolepayout/validator/*.flat
   marlowe/scripts/semantics/*.benchmark
+  marlowe/scripts/semantics/validator/*.flat
   validation/data/*.flat
 
 source-repository head
@@ -602,6 +604,7 @@ library marlowe-internal
     , newtype-generics
     , plutus-benchmark-common
     , plutus-core                       ^>=1.60
+    , plutus-core:flat
     , plutus-ledger-api                 ^>=1.60
     , plutus-ledger-api:plutus-execlib
     , plutus-tx                         ^>=1.60
@@ -639,10 +642,10 @@ benchmark marlowe
   build-depends:
     , base                     >=4.9   && <5
     , criterion
+    , filepath
     , marlowe-internal
     , plutus-benchmark-common
     , plutus-ledger-api        ^>=1.60
-    , plutus-tx                ^>=1.60
 
 test-suite plutus-benchmark-marlowe-tests
   import:         lang, ghc-version-support, os-support
@@ -718,10 +721,10 @@ benchmark marlowe-agda-cek
     , agda-internal
     , base                     >=4.9   && <5
     , criterion
+    , filepath
     , marlowe-internal
     , plutus-benchmark-common
     , plutus-ledger-api        ^>=1.60
-    , plutus-tx                ^>=1.60
 
 -------------------- bitwise -----------------------
 
