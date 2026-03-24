@@ -75,6 +75,7 @@ library
     PlutusTx.Compiler.Utils
     PlutusTx.PIRTypes
     PlutusTx.PLCTypes
+    PlutusTx.Plugin.Boilerplate
     PlutusTx.Plugin.Unsupported
 
   build-depends:
@@ -86,6 +87,7 @@ library
     , either
     , extra
     , ghc
+    , ghc-boot
     , lens
     , megaparsec
     , mtl
@@ -226,6 +228,25 @@ test-suite plutus-tx-plugin-tests
   ghc-options:
     -g -fno-strictness -fno-unbox-strict-fields
     -fno-unbox-small-strict-fields -fno-full-laziness
+
+test-suite frontend-plugin-tests
+  import:         lang, ghc-version-support, os-support
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test-frontend-plugin
+  main-is:        Spec.hs
+  other-modules:
+    NoStrict.Spec
+    Strict.Spec
+
+  build-depends:
+    , base                             >=4.9   && <5
+    , plutus-core:plutus-core-testlib
+    , plutus-tx                        ^>=1.60
+    , plutus-tx-plugin                 ^>=1.60
+    , plutus-tx:plutus-tx-testlib
+    , tasty
+
+  ghc-options:    -threaded -rtsopts -with-rtsopts=-N
 
 -- A suite for tests that use the Plutus Tx plugin. We don't merge those into
 -- @plutus-ledger-api-test@, because @plutus-ledger-api@ has to be buildable for older versions of
