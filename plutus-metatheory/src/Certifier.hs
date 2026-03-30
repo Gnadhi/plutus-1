@@ -21,13 +21,14 @@ import System.Directory (createDirectory)
 import System.FilePath ((</>))
 
 import FFI.AgdaUnparse (AgdaUnparse (..))
-import FFI.SimplifierTrace (Trace, mkFfiSimplifierTrace)
+import FFI.CostInfo
+import FFI.SimplifierTrace (Trace, mkFfiSimplifierTrace, toEvalResult)
 import FFI.Untyped (UTerm)
-
-import UntypedPlutusCore qualified as UPLC
-import UntypedPlutusCore.Transform.Simplifier
-
 import MAlonzo.Code.Certifier (runCertifierMain)
+import PlutusLedgerApi.Common
+import UntypedPlutusCore qualified as UPLC
+import UntypedPlutusCore.Evaluation.Machine.Cek
+import UntypedPlutusCore.Transform.Simplifier
 
 type CertName = String
 type CertDir = FilePath
@@ -77,10 +78,17 @@ mkCertifier
   -> CertName
   -- ^ The name of the certificate to be produced
   -> CertifierOutput
+  -> [ ( Maybe
+           (CekEvaluationException UPLC.NamedDeBruijn UPLC.DefaultUni UPLC.DefaultFun)
+       , ExBudget
+       )
+     ]
   -> Certifier Bool
-mkCertifier simplTrace certName certOutput = do
+mkCertifier simplTrace certName certOutput costs = do
   let rawAgdaTrace = mkFfiSimplifierTrace simplTrace
-  case runCertifierMain rawAgdaTrace of
+      costs' :: [EvalResult]
+      costs' = uncurry toEvalResult <$> reverse costs
+  case runCertifierMain rawAgdaTrace costs' of
     Just (passed, report) -> do
       liftIO . putStrLn $
         "Certifier result: "
