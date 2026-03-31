@@ -46,6 +46,7 @@ import VerifiedCompilation.UApplyToCase as UA2C
 import VerifiedCompilation.UCaseOfCase as UCC
 import VerifiedCompilation.UForceDelay as UFD
 import VerifiedCompilation.UFloatDelay as UFlD
+import VerifiedCompilation.UForceCaseDelay as UFCD
 import VerifiedCompilation.UCSE as UCSE
 import VerifiedCompilation.UInline as UInline
 import VerifiedCompilation.UCaseReduce as UCR
@@ -76,7 +77,7 @@ mRelationOf cseT            = just UCSE.UntypedCSE
 mRelationOf inlineT         = just (UInline.Inline (λ()) UInline.□)
 mRelationOf unknown         = nothing
 mRelationOf caseOfCaseT     = nothing -- FIXME: https://github.com/IntersectMBO/plutus-private/issues/2054
-mRelationOf forceCaseDelayT = nothing -- FIXME: https://github.com/IntersectMBO/plutus-private/issues/2053
+mRelationOf forceCaseDelayT = just UFCD.ForceCaseDelay
 mRelationOf applyToCaseT    = just UA2C.UApplyToCase
 ```
 
@@ -99,7 +100,7 @@ certifyPass forceDelayT _       = decider UFD.isForceDelay?
 certifyPass caseReduceT _       = decider UCR.isCaseReduce?
 certifyPass cseT _              = decider UCSE.isUntypedCSE?
 certifyPass caseOfCaseT _       = certNotImplemented
-certifyPass forceCaseDelayT _   = certNotImplemented
+certifyPass forceCaseDelayT _   = decider UFCD.isForceCaseDelay?
 certifyPass applyToCaseT _      = decider UA2C.a2c?ᶜᶜ
 certifyPass inlineT (inline hs) = checker (UInline.top-check hs)
 certifyPass inlineT none        = λ M M' → abort inlineT M M'
