@@ -375,6 +375,7 @@ test-suite plutus-core-test
     CostModelSafety.Spec
     Evaluation.Machines
     Evaluation.Spec
+    Flat.Spec
     Generators.QuickCheck.Utils
     Names.Spec
     Normalization.Check
@@ -935,6 +936,7 @@ executable print-cost-model
     , bytestring
     , plutus-core  ^>=1.60
 
+-- Golden file generator for Flat encoding stability tests.
 ----------------------------------------------
 -- satint
 ----------------------------------------------
@@ -1129,6 +1131,7 @@ test-suite flat-test
     , QuickCheck
     , quickcheck-text
     , tasty
+    , tasty-golden
     , tasty-hunit
     , tasty-quickcheck
     , text
